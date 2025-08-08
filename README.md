@@ -31,7 +31,7 @@ This custom node pack provides advanced VACE functionality for WAN video models 
 
 ## Installation
 
-1. Place this folder in your ComfyUI `custom_nodes` directory
+1. Clone this repository into your ComfyUI `custom_nodes` directory
 2. Restart ComfyUI
 3. The nodes will appear under the "WanVaceAdvanced" category
 
