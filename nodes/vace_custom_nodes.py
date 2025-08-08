@@ -34,7 +34,7 @@ class WanVacePhantomExperimental:
                             "vace_ref2_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
                             # Phantom inputs
                             "phantom_images": ("IMAGE", ),
-                            "phantom_mask_value": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Vace mask value for the Phantom embed region."}),
+                            "phantom_mask_value": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Vace mask value for the Phantom embed region."}),
                             "phantom_control_value": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Padded vace embedded latents value for the Phantom embed region."}),
                 }}
 
@@ -50,7 +50,7 @@ class WanVacePhantomExperimental:
                vace_strength=1.0, vace_strength2=1.0, vace_ref_strength=None, vace_ref2_strength=None,
                control_video=None, control_masks=None, vace_reference=None,
                control_video2=None, control_masks2=None, vace_reference_2=None,
-               phantom_images=None, phantom_mask_value=0.0, phantom_control_value=0.0,
+               phantom_images=None, phantom_mask_value=1.0, phantom_control_value=0.0,
                ):
 
         if control_video is not None:
@@ -88,7 +88,7 @@ class WanVacePhantomExperimental:
 
         vace_latent_length = ((vace_length - 1) // 4) + 1
         original_vace_latent_length = vace_latent_length  # Save original before it gets modified
-        control_video_original_length = 0 if control_video is None else control_video.shape[0]
+        control_video_original_length = length if control_video is None else control_video.shape[0]
         if control_video is not None:
             control_video = comfy.utils.common_upscale(control_video[:control_video_original_length].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
             if control_video.shape[0] < vace_length:
@@ -152,7 +152,7 @@ class WanVacePhantomExperimental:
         print(f"Control strength: {format_strength_list(control_strength_part)} (length {len(control_strength_part)})")
         print(f"Phantom images strength: {format_strength_list(phantom_strength_part)} (length {len(phantom_strength_part)})")
 
-        control_masks_original_length = 0 if control_masks is None else control_masks.shape[0]
+        control_masks_original_length = length if control_masks is None else control_masks.shape[0]
         if control_masks is not None:
             mask = control_masks
             if mask.ndim == 3:
@@ -207,7 +207,7 @@ class WanVacePhantomExperimental:
             print(f"Processing second VACE with strength {vace_strength2}")
             
             # Process second control video
-            control_video2_original_length = 0 if control_video2 is None else control_video2.shape[0]
+            control_video2_original_length = length if control_video2 is None else control_video2.shape[0]
             if control_video2 is not None:
                 control_video2 = comfy.utils.common_upscale(control_video2[:control_video2_original_length].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
                 if control_video2.shape[0] < vace_length:
@@ -216,7 +216,7 @@ class WanVacePhantomExperimental:
                 control_video2 = torch.ones((vace_length, height, width, 3)) * 0.5
 
             # Process second control masks
-            control_masks2_original_length = 0 if control_masks2 is None else control_masks2.shape[0]
+            control_masks2_original_length = length if control_masks2 is None else control_masks2.shape[0]
             if control_masks2 is not None:
                 mask2 = control_masks2
                 if mask2.ndim == 3:
