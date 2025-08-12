@@ -98,7 +98,7 @@ def wrap_vace_phantom_wan_model(model):
     
     model_clone.set_model_unet_function_wrapper(outer_wrapper())
     
-    logging.info("VaceWanModel patched for separate reference strength support using unet wrapper")
+    logging.info("WanVaceAdvanced model patch applied")
     return model_clone
 
 
@@ -107,7 +107,7 @@ def unwrap_vace_phantom_wan_model(model):
     Remove the patch from a VaceWanModel.
     """
     model_clone = model.clone()
-    logging.info("VaceWanModel patch removed")
+    logging.info("WanVaceAdvanced model patch removed")
     return model_clone
 
 def _vaceph_forward_orig(
