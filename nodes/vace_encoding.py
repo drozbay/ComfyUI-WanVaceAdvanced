@@ -145,7 +145,7 @@ def encode_vace_advanced(positive, negative, vae, width, height, length, batch_s
     vace_strength_list_all = [vace_strength_list]
 
     # Process second VACE operation if provided
-    if control_video2 is not None or control_masks2 is not None:        
+    if control_video2 is not None or control_masks2 is not None or vace_reference_2 is not None:
         # Process second control video
         control_video2_original_length = length if control_video2 is None else control_video2.shape[0]
         if control_video2 is not None:
