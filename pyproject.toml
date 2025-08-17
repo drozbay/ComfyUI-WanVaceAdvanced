@@ -28,7 +28,7 @@ Documentation = "https://github.com/drozbay/ComfyUI-WanVaceAdvanced/wiki"
 "Bug Tracker" = "https://github.com/drozbay/ComfyUI-WanVaceAdvanced/issues"
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "drozbay"
 DisplayName = "ComfyUI-WanVaceAdvanced"
 Icon = ""
 includes = [] 
