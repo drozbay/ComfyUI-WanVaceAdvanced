@@ -2,10 +2,10 @@ import nodes
 import node_helpers
 import torch
 import comfy.model_management
-import comfy.utils
 import comfy.latent_formats
+import logging
 
-from .vace_encoding import encode_vace_advanced
+from ..core.vace_encoding import encode_vace_advanced
 
 class WanVacePhantomSimple:
     def __init__(self) -> None:
@@ -48,11 +48,11 @@ class WanVacePhantomSimple:
         vace_reference_2 = None
 
         return encode_vace_advanced(positive, negative, vae, width, height, length, batch_size,
-                                    vace_strength=vace_strength, vace_strength2=vace_strength2,
-                                    vace_ref_strength=vace_ref_strength, vace_ref2_strength=vace_ref2_strength,
-                                    control_video=control_video, control_masks=control_masks,
-                                    vace_reference=vace_reference, control_video2=control_video2,
-                                    control_masks2=control_masks2, vace_reference_2=vace_reference_2,
+                                    vace_strength_1=vace_strength, vace_strength_2=vace_strength2,
+                                    vace_ref_strength_1=vace_ref_strength, vace_ref_strength_2=vace_ref2_strength,
+                                    control_video_1=control_video, control_masks_1=control_masks,
+                                    vace_reference_1=vace_reference, control_video_2=control_video2,
+                                    control_masks_2=control_masks2, vace_reference_2=vace_reference_2,
                                     phantom_images=phantom_images)
 
 
@@ -98,11 +98,11 @@ class WanVacePhantomDual:
                phantom_images=None):
 
         return encode_vace_advanced(positive, negative, vae, width, height, length, batch_size,
-                                    vace_strength=vace_strength, vace_strength2=vace_strength2,
-                                    vace_ref_strength=vace_ref_strength, vace_ref2_strength=vace_ref_strength2,
-                                    control_video=control_video, control_masks=control_masks,
-                                    vace_reference=vace_reference, control_video2=control_video2,
-                                    control_masks2=control_masks2, vace_reference_2=vace_reference_2,
+                                    vace_strength_1=vace_strength, vace_strength_2=vace_strength2,
+                                    vace_ref_strength_1=vace_ref_strength, vace_ref_strength_2=vace_ref_strength2,
+                                    control_video_1=control_video, control_masks_1=control_masks,
+                                    vace_reference_1=vace_reference, control_video_2=control_video2,
+                                    control_masks_2=control_masks2, vace_reference_2=vace_reference_2,
                                     phantom_images=phantom_images)
 
 
@@ -136,7 +136,7 @@ class WanVacePhantomExperimental:
                             "phantom_images": ("IMAGE", ),
                             "phantom_mask_value": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Vace mask value for the Phantom embed region."}),
                             "phantom_control_value": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Padded vace embedded latents value for the Phantom embed region."}),
-                            "phantom_vace_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01, "tooltip": "Vace strength value for the Phantom embed region. (Read: *NOT* the strength of the Phantom embeds, just the strength of the Vace embedding applied to the Phantom region.)"})
+                            "phantom_vace_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000.0, "step": 0.01, "tooltip": "Vace strength value for the Phantom embed region. (Read: *NOT* the strength of the Phantom embeds, just the strength of the Vace embedding applied to the Phantom region.)"})
                 }}
 
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT", "INT")
@@ -155,17 +155,231 @@ class WanVacePhantomExperimental:
                ):
 
         return encode_vace_advanced(positive, negative, vae, width, height, length, batch_size,
-                                    vace_strength=vace_strength, vace_strength2=vace_strength2,
-                                    vace_ref_strength=vace_ref_strength, vace_ref2_strength=vace_ref_strength2,
-                                    control_video=control_video, control_masks=control_masks,
-                                    vace_reference=vace_reference, control_video2=control_video2,
-                                    control_masks2=control_masks2, vace_reference_2=vace_reference_2,
+                                    vace_strength_1=vace_strength, vace_strength_2=vace_strength2,
+                                    vace_ref_strength_1=vace_ref_strength, vace_ref_strength_2=vace_ref_strength2,
+                                    control_video_1=control_video, control_masks_1=control_masks,
+                                    vace_reference_1=vace_reference, control_video_2=control_video2,
+                                    control_masks_2=control_masks2, vace_reference_2=vace_reference_2,
                                     phantom_images=phantom_images, phantom_mask_value=phantom_mask_value,
                                     phantom_control_value=phantom_control_value, phantom_vace_strength=phantom_vace_strength
                                     )
 
 
-from ..patches import wrap_vace_phantom_wan_model, unwrap_vace_phantom_wan_model
+class WanVacePhantomSimpleV2:
+    def __init__(self) -> None:
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "model": ("MODEL", ),
+            "positive": ("CONDITIONING", ),
+            "negative": ("CONDITIONING", ),
+            "vae": ("VAE", ),
+            "width": ("INT", {"default": 832, "min": 16, "max": nodes.MAX_RESOLUTION, "step": 16}),
+            "height": ("INT", {"default": 480, "min": 16, "max": nodes.MAX_RESOLUTION, "step": 16}),
+            "length": ("INT", {"default": 81, "min": 1, "max": nodes.MAX_RESOLUTION, "step": 4}),
+            "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
+        },
+        "optional": {
+            "latent_in": ("LATENT", {"tooltip": "Optional latent input to continue from"}),
+            "control_video": ("IMAGE", ),
+            "control_masks": ("MASK", ),
+            "vace_reference": ("IMAGE", ),
+            "vace_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
+            "vace_ref_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
+            "phantom_images": ("IMAGE", ),
+        }}
+
+    RETURN_TYPES = ("MODEL", "CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT", "INT")
+    RETURN_NAMES = ("model", "positive", "negative", "neg_phant_img", "latent", "trim_latent")
+    FUNCTION = "encode"
+
+    CATEGORY = "WanVaceAdvanced"
+
+    def encode(self, positive, negative, vae, width, height, length, batch_size,
+               model = None, latent_in = None,
+               vace_strength=1.0, vace_ref_strength=1.0,
+               control_video=None, control_masks=None, vace_reference=None, phantom_images=None):
+
+        vace_strength_2 = 1.0
+        vace_ref_strength_2 = 1.0
+        control_video_2 = None
+        control_masks_2 = None
+        vace_reference_2 = None
+
+        result = encode_vace_advanced(positive, negative, vae, width, height, length, batch_size,
+                                    vace_strength_1=vace_strength, vace_strength_2=vace_strength_2,
+                                    vace_ref_strength_1=vace_ref_strength, vace_ref_strength_2=vace_ref_strength_2,
+                                    control_video_1=control_video, control_masks_1=control_masks,
+                                    vace_reference_1=vace_reference, control_video_2=control_video_2,
+                                    control_masks_2=control_masks_2, vace_reference_2=vace_reference_2,
+                                    phantom_images=phantom_images
+                                    )
+
+        # Unpack the result
+        positive_out, negative_out, neg_phant_img_out, latent_out, trim_latent_out = result
+        
+        latent_out = _process_incoming_latent(latent_in, latent_out, height, width, length, vace_reference_list=[vace_reference, vace_reference_2])
+
+        # Handle model patching if model was provided
+        output_model = model
+        if model is not None:
+            from ..core.patches import wrap_vace_phantom_wan_model
+            output_model = wrap_vace_phantom_wan_model(model.clone())
+            
+        return (output_model, positive_out, negative_out, neg_phant_img_out, latent_out, trim_latent_out)
+
+
+class WanVacePhantomDualV2:
+    def __init__(self) -> None:
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "model": ("MODEL", ),
+            "positive": ("CONDITIONING", ),
+            "negative": ("CONDITIONING", ),
+            "vae": ("VAE", ),
+            "width": ("INT", {"default": 832, "min": 16, "max": nodes.MAX_RESOLUTION, "step": 16}),
+            "height": ("INT", {"default": 480, "min": 16, "max": nodes.MAX_RESOLUTION, "step": 16}),
+            "length": ("INT", {"default": 81, "min": 1, "max": nodes.MAX_RESOLUTION, "step": 4}),
+            "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
+        },
+        "optional": {
+            # Latent
+            "latent_in": ("LATENT", {"tooltip": "Optional latent input to continue from"}),
+            # First Vace Control
+            "control_video_1": ("IMAGE", ),
+            "control_masks_1": ("MASK", ),
+            "vace_reference_1": ("IMAGE", ),
+            "vace_strength_1": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
+            "vace_ref_strength_1": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
+            # Second Vace Control
+            "control_video_2": ("IMAGE",),
+            "control_masks_2": ("MASK",),
+            "vace_reference_2": ("IMAGE", ),
+            "vace_strength_2": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
+            "vace_ref_strength_2": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
+            # Phantom input
+            "phantom_images": ("IMAGE", ),
+        }}
+
+    RETURN_TYPES = ("MODEL", "CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT", "INT")
+    RETURN_NAMES = ("model", "positive", "negative", "neg_phant_img", "latent", "trim_latent")
+    FUNCTION = "encode"
+
+    CATEGORY = "WanVaceAdvanced"
+
+    def encode(self, positive, negative, vae, width, height, length, batch_size,
+                model = None, latent_in = None,
+                vace_strength_1=1.0, vace_strength_2=1.0, vace_ref_strength_1=1.0, vace_ref_strength_2=1.0,
+                control_video_1=None, control_masks_1=None, vace_reference_1=None,
+                control_video_2=None, control_masks_2=None, vace_reference_2=None,
+                phantom_images=None):
+
+        result = encode_vace_advanced(positive, negative, vae, width, height, length, batch_size,
+                                    vace_strength_1=vace_strength_1, vace_strength_2=vace_strength_2,
+                                    vace_ref_strength_1=vace_ref_strength_1, vace_ref_strength_2=vace_ref_strength_2,
+                                    control_video_1=control_video_1, control_masks_1=control_masks_1,
+                                    vace_reference_1=vace_reference_1, control_video_2=control_video_2,
+                                    control_masks_2=control_masks_2, vace_reference_2=vace_reference_2,
+                                    phantom_images=phantom_images
+                                    )
+        
+        # Unpack the result
+        positive_out, negative_out, neg_phant_img_out, latent_out, trim_latent_out = result
+        
+        latent_out = _process_incoming_latent(latent_in, latent_out, height, width, length, vace_reference_list=[vace_reference_1, vace_reference_2])
+
+        # Handle model patching if model was provided
+        output_model = model
+        if model is not None:
+            from ..core.patches import wrap_vace_phantom_wan_model
+            output_model = wrap_vace_phantom_wan_model(model.clone())
+            
+        return (output_model, positive_out, negative_out, neg_phant_img_out, latent_out, trim_latent_out)
+
+
+class WanVacePhantomExperimentalV2:
+    """
+    V2 version with optional latent input and smart reference frame handling.
+    Supports state_info latents and automatic reference frame detection.
+    """
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+                            "model": ("MODEL", ),
+                            "positive": ("CONDITIONING", ),
+                            "negative": ("CONDITIONING", ),
+                            "vae": ("VAE", ),
+                            "width": ("INT", {"default": 832, "min": 16, "max": nodes.MAX_RESOLUTION, "step": 16}),
+                            "height": ("INT", {"default": 480, "min": 16, "max": nodes.MAX_RESOLUTION, "step": 16}),
+                            "length": ("INT", {"default": 81, "min": 1, "max": nodes.MAX_RESOLUTION, "step": 4}),
+                            "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
+                },
+                "optional": {
+                            # Latent input
+                            "latent_in": ("LATENT", {"tooltip": "Optional latent input to continue from"}),
+                            # First VACE control
+                            "control_video_1": ("IMAGE", ),
+                            "control_masks_1": ("MASK", ),
+                            "vace_reference_1": ("IMAGE", ),
+                            "vace_strength_1": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
+                            "vace_ref_strength_1": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
+                            # Second VACE control
+                            "control_video_2": ("IMAGE", {"tooltip": "Second control video input"}),
+                            "control_masks_2": ("MASK", {"tooltip": "Second control masks input"}),
+                            "vace_reference_2": ("IMAGE", ),
+                            "vace_strength_2": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
+                            "vace_ref_strength_2": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
+                            # Phantom inputs
+                            "phantom_images": ("IMAGE", ),
+                            "phantom_vace_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000.0, "step": 0.01, "tooltip": "Vace strength value for the Phantom embed region."})
+                }}
+
+    RETURN_TYPES = ("MODEL", "CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT", "INT",)
+    RETURN_NAMES = ("model", "positive", "negative", "neg_phant_img", "latent", "trim_latent")
+    FUNCTION = "encode"
+    
+    CATEGORY = "WanVaceAdvanced"
+    EXPERIMENTAL = True
+
+    def encode(self, positive, negative, vae, width, height, length, batch_size,
+               model=None, latent_in=None,
+               vace_strength_1=1.0, vace_strength_2=1.0, vace_ref_strength_1=None, vace_ref_strength_2=None,
+               control_video_1=None, control_masks_1=None, vace_reference_1=None,
+               control_video_2=None, control_masks_2=None, vace_reference_2=None,
+               phantom_images=None, phantom_mask_value=1.0, phantom_control_value=0.0, phantom_vace_strength=1.0
+               ):
+        
+        result = encode_vace_advanced(positive, negative, vae, width, height, length, batch_size,
+                                      vace_strength_1=vace_strength_1, vace_strength_2=vace_strength_2,
+                                      vace_ref_strength_1=vace_ref_strength_1, vace_ref_strength_2=vace_ref_strength_2,
+                                      control_video_1=control_video_1, control_masks_1=control_masks_1,
+                                      vace_reference_1=vace_reference_1, control_video_2=control_video_2,
+                                      control_masks_2=control_masks_2, vace_reference_2=vace_reference_2,
+                                      phantom_images=phantom_images, phantom_mask_value=phantom_mask_value,
+                                      phantom_control_value=phantom_control_value, phantom_vace_strength=phantom_vace_strength,
+                                      )
+        
+        # Unpack the result
+        positive_out, negative_out, neg_phant_img_out, latent_out, trim_latent_out = result
+        
+        latent_out = _process_incoming_latent(latent_in, latent_out, height, width, length, vace_reference_list=[vace_reference_1, vace_reference_2])
+        
+        # Handle model patching if model was provided
+        output_model = model
+        if model is not None:
+            from ..core.patches import wrap_vace_phantom_wan_model
+            output_model = wrap_vace_phantom_wan_model(model.clone())
+    
+        return (output_model, positive_out, negative_out, neg_phant_img_out, latent_out, trim_latent_out)
+
+
+from ..core.patches import wrap_vace_phantom_wan_model, unwrap_vace_phantom_wan_model
 
 class WanVaceToVideoLatent:
     @classmethod
@@ -392,21 +606,208 @@ class VaceStrengthTester:
         
         return (new_positive, info)
 
+def _process_incoming_latent(latent_in, latent_out, height, width, length, vace_reference_list):
+    @staticmethod
+    def _replace_reference_frames(tensor, num_frames):
+        """Replace first N frames with zeros along temporal dimension (-3)"""
+        if num_frames <= 0:
+            return tensor
+        
+        tensor_copy = tensor.clone()
+        if tensor.shape[-3] >= num_frames:
+            # Replace the first N frames with zeros
+            tensor_copy[..., :num_frames, :, :] = 0
+        return tensor_copy
+    
+    @staticmethod  
+    def _trim_reference_frames(tensor, num_frames):
+        """Remove first N frames along temporal dimension (-3)"""
+        if num_frames <= 0:
+            return tensor
+        if tensor.shape[-3] > num_frames:
+            return tensor[..., num_frames:, :, :]
+        # If we'd trim everything, return a single zero frame
+        return torch.zeros_like(tensor[..., :1, :, :])
+    
+    @staticmethod
+    def _add_reference_frames(tensor, num_frames):
+        """Add N reference frames at the beginning along temporal dimension (-3)"""
+        if num_frames <= 0:
+            return tensor
+
+        tensor_copy = tensor.clone()
+        # Pad the beginning with zeros
+        padding = torch.zeros_like(tensor_copy[..., :num_frames, :, :])
+        tensor_copy = torch.cat([padding, tensor_copy], dim=-3)
+        return tensor_copy
+
+    # First determine if we will be adding reference frames, replacing existing reference frames, or trimming off reference frames:
+    expected_latent_frames = ((length - 1) // 4) + 1
+            
+    # If any of the local vace_reference inputs are present, we need a reference frame
+    our_ref_frames = 0
+    for ref in vace_reference_list:
+        if ref is not None:
+            our_ref_frames = 1
+
+    # Process incoming latent if provided
+    processed_latent = None
+    if latent_in is not None:
+        latent_samples = latent_in.get("samples")
+        if latent_samples is not None:
+            # Validate latent dimensions
+            expected_h = height // 8
+            expected_w = width // 8
+            actual_h = latent_samples.shape[3]
+            actual_w = latent_samples.shape[4]
+                    
+            if actual_h != expected_h or actual_w != expected_w:
+                raise ValueError(
+                    f"Latent dimension mismatch: Expected {expected_h}x{expected_w} "
+                    f"(from {height}x{width} pixels), but got {actual_h}x{actual_w}. "
+                    f"Please ensure the latent was generated with the same resolution settings."
+                )
+                    
+            actual_latent_frames = latent_samples.shape[2]
+
+            detected_ref_frames = 0
+            # Auto-detect if actual frames = expected + 1, assume 1 reference frame
+            if actual_latent_frames == expected_latent_frames + 1:
+                detected_ref_frames = 1
+            elif actual_latent_frames == expected_latent_frames:
+                detected_ref_frames = 0
+            else:
+                #something is wrong, length is not right
+                raise ValueError(f"Unexpected latent input frame count: {actual_latent_frames}, expected: {expected_latent_frames}")
+
+            # process the latent based on our decision
+            ref_shape = latent_samples.shape
+                    
+            if our_ref_frames > 0:
+                # We have new reference frames
+                if detected_ref_frames > 0:
+                    # Replace existing reference frames
+                    processed_latent = _apply_to_latent_dict(
+                        latent_in, ref_shape, _replace_reference_frames, detected_ref_frames
+                    )
+                else:
+                    # Add new reference frames at the start
+                    processed_latent = _apply_to_latent_dict(
+                        latent_in, ref_shape, _add_reference_frames, our_ref_frames
+                    )
+            else:
+                # We have no new reference frames
+                if detected_ref_frames > 0:
+                    # Trim existing reference frames
+                    processed_latent = _apply_to_latent_dict(
+                        latent_in, ref_shape, _trim_reference_frames, detected_ref_frames
+                    )
+                else:
+                    # No references anywhere, use as-is
+                    processed_latent = latent_in
+
+    # If we processed an incoming latent, use it instead of the generated one
+    if processed_latent is not None:
+        # Adjust the processed latent to match expected dimensions if needed
+        processed_samples = processed_latent.get("samples")
+        expected_samples = latent_out.get("samples")
+                
+        if processed_samples is not None and expected_samples is not None:
+            # Ensure the processed latent has the right dimensions
+            if processed_samples.shape[2] < expected_samples.shape[2]:
+                # Pad with zeros if too short
+                pad_frames = expected_samples.shape[2] - processed_samples.shape[2]
+                padding = comfy.latent_formats.Wan21().process_out(torch.zeros_like(processed_samples[..., :pad_frames, :, :]))
+                logging.warning(f"Processed samples padded from {processed_samples.shape[2]} to {expected_samples.shape[2]}")
+                processed_samples = torch.cat([processed_samples, padding], dim=2)
+            elif processed_samples.shape[2] > expected_samples.shape[2]:
+                # Truncate if too long
+                logging.warning(f"Processed samples truncated from {processed_samples.shape[2]} to {expected_samples.shape[2]}")
+                processed_samples = processed_samples[..., :expected_samples.shape[2], :, :]
+
+            # Update the latent output
+            latent_out = dict(processed_latent)
+            latent_out["samples"] = processed_samples
+
+    return latent_out
+
+# Local latent handling (compatible with RES4LYF but independent)
+def _apply_to_latent_dict(obj, ref_shape, modify_func, *args, **kwargs):
+
+    """
+    Recursively traverse obj and apply modify_func to tensors whose last 5 dimensions
+    match ref_shape's last 5 dimensions. Used for state_info compatibility.
+    
+    Args:
+        obj: The object to traverse (dict, list, tuple, tensor, etc.)
+        ref_shape: Reference tensor shape to match against
+        modify_func: Function to apply to matching tensors. Should accept (tensor, *args, **kwargs)
+        *args, **kwargs: Additional arguments passed to modify_func
+    
+    Returns:
+        Modified structure with applicable tensors transformed
+    """
+    import torch
+
+    if isinstance(obj, torch.Tensor):
+        if obj.ndim >= 5:
+            # Check if last 5 dims match reference
+            obj_last5 = obj.shape[-5:]
+            ref_last5 = ref_shape[-5:] if len(ref_shape) >= 5 else ref_shape
+            if obj_last5 == ref_last5:
+                return modify_func(obj, *args, **kwargs)
+        return obj
+
+    if isinstance(obj, dict):
+        changed = False
+        out = {}
+        for k, v in obj.items():
+            nv = _apply_to_latent_dict(v, ref_shape, modify_func, *args, **kwargs)
+            changed |= (nv is not v)
+            out[k] = nv
+        return out if changed else obj
+
+    if isinstance(obj, list):
+        changed = False
+        out = []
+        for v in obj:
+            nv = _apply_to_latent_dict(v, ref_shape, modify_func, *args, **kwargs)
+            changed |= (nv is not v)
+            out.append(nv)
+        return out if changed else obj
+
+    if isinstance(obj, tuple):
+        changed = False
+        out = []
+        for v in obj:
+            nv = _apply_to_latent_dict(v, ref_shape, modify_func, *args, **kwargs)
+            changed |= (nv is not v)
+            out.append(nv)
+        return tuple(out) if changed else obj
+
+    return obj
+
+
 
 NODE_CLASS_MAPPINGS = {
     "WanVacePhantomSimple": WanVacePhantomSimple,
     "WanVacePhantomDual": WanVacePhantomDual,
     "WanVacePhantomExperimental": WanVacePhantomExperimental,
+    "WanVacePhantomSimpleV2": WanVacePhantomSimpleV2,
+    "WanVacePhantomDualV2": WanVacePhantomDualV2,
+    "WanVacePhantomExperimentalV2": WanVacePhantomExperimentalV2,
     "WanVaceToVideoLatent": WanVaceToVideoLatent,
     "VaceAdvancedModelPatch": VaceAdvancedModelPatch,
     "VaceStrengthTester": VaceStrengthTester,
-
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "WanVacePhantomSimple": "WanVacePhantomSimple",
     "WanVacePhantomDual": "WanVacePhantomDual",
     "WanVacePhantomExperimental": "WanVacePhantomExperimental",
+    "WanVacePhantomSimpleV2": "WanVacePhantomSimpleV2",
+    "WanVacePhantomDualV2": "WanVacePhantomDualV2",
+    "WanVacePhantomExperimentalV2": "WanVacePhantomExperimentalV2",
     "WanVaceToVideoLatent": "WanVaceToVideoLatent",
     "VaceAdvancedModelPatch": "VaceAdvancedModelPatch",
     "VaceStrengthTester": "VaceStrengthTester",

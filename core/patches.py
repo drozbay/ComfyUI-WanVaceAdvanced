@@ -8,12 +8,6 @@ This section provides a wrapper for the VaceWanModel that supports separate
 strength values for reference frames and control frames.
 """
 
-# Test mode flags
-TEST_MODE_1_ZEROS_INSTEAD_OF_PATCH_EMBEDDING = False
-TEST_MODE_2_USE_ONES_VALUES_INSTEAD_OF_PATCH_EMBEDDING = False
-TEST_MODE_3_USE_SCALED_VALUES_INSTEAD_OF_PATCH_EMBEDDING = False
-TEST_SCALE = 1.0
-
 import torch
 import comfy.ldm.wan.model
 from comfy.ldm.wan.model import sinusoidal_embedding_1d
