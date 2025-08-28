@@ -208,6 +208,24 @@ class WanVacePhantomSimpleV2:
         control_masks_2 = None
         vace_reference_2 = None
 
+        # If a latent input is provided, ensure the node width/height match the latent's decoded pixel size.
+        # Latent tensors are expected shape [..., C, T, H_latent, W_latent] -> pixel size = H_latent * vae_stride, W_latent * vae_stride
+        vae_stride = 8
+        try:
+            if latent_in is not None and isinstance(latent_in, dict):
+                latent_samples = latent_in.get("samples")
+                if isinstance(latent_samples, torch.Tensor) and latent_samples.ndim >= 5:
+                    latent_w = int(latent_samples.shape[-1])
+                    latent_h = int(latent_samples.shape[-2])
+                    new_width = latent_w * vae_stride
+                    new_height = latent_h * vae_stride
+                    if new_width != width or new_height != height:
+                        logging.info(f"Latent input detected — adjusting node width/height from {width}x{height} to {new_width}x{new_height}")
+                        width = new_width
+                        height = new_height
+        except Exception as e:
+            logging.warning(f"Failed to auto-adjust width/height from latent input: {e}")
+
         result = encode_vace_advanced(positive, negative, vae, width, height, length, batch_size,
                                     vace_strength_1=vace_strength, vace_strength_2=vace_strength_2,
                                     vace_ref_strength_1=vace_ref_strength, vace_ref_strength_2=vace_ref_strength_2,
@@ -278,6 +296,24 @@ class WanVacePhantomDualV2:
                 control_video_1=None, control_masks_1=None, vace_reference_1=None,
                 control_video_2=None, control_masks_2=None, vace_reference_2=None,
                 phantom_images=None):
+        
+        # If a latent input is provided, ensure the node width/height match the latent's decoded pixel size.
+        # Latent tensors are expected shape [..., C, T, H_latent, W_latent] -> pixel size = H_latent * vae_stride, W_latent * vae_stride
+        vae_stride = 8
+        try:
+            if latent_in is not None and isinstance(latent_in, dict):
+                latent_samples = latent_in.get("samples")
+                if isinstance(latent_samples, torch.Tensor) and latent_samples.ndim >= 5:
+                    latent_w = int(latent_samples.shape[-1])
+                    latent_h = int(latent_samples.shape[-2])
+                    new_width = latent_w * vae_stride
+                    new_height = latent_h * vae_stride
+                    if new_width != width or new_height != height:
+                        logging.info(f"Latent input detected — adjusting node width/height from {width}x{height} to {new_width}x{new_height}")
+                        width = new_width
+                        height = new_height
+        except Exception as e:
+            logging.warning(f"Failed to auto-adjust width/height from latent input: {e}")
 
         result = encode_vace_advanced(positive, negative, vae, width, height, length, batch_size,
                                     vace_strength_1=vace_strength_1, vace_strength_2=vace_strength_2,
@@ -355,6 +391,24 @@ class WanVacePhantomExperimentalV2:
                phantom_images=None, phantom_mask_value=1.0, phantom_control_value=0.0, phantom_vace_strength=1.0
                ):
         
+        # If a latent input is provided, ensure the node width/height match the latent's decoded pixel size.
+        # Latent tensors are expected shape [..., C, T, H_latent, W_latent] -> pixel size = H_latent * vae_stride, W_latent * vae_stride
+        vae_stride = 8
+        try:
+            if latent_in is not None and isinstance(latent_in, dict):
+                latent_samples = latent_in.get("samples")
+                if isinstance(latent_samples, torch.Tensor) and latent_samples.ndim >= 5:
+                    latent_w = int(latent_samples.shape[-1])
+                    latent_h = int(latent_samples.shape[-2])
+                    new_width = latent_w * vae_stride
+                    new_height = latent_h * vae_stride
+                    if new_width != width or new_height != height:
+                        logging.info(f"Latent input detected — adjusting node width/height from {width}x{height} to {new_width}x{new_height}")
+                        width = new_width
+                        height = new_height
+        except Exception as e:
+            logging.warning(f"Failed to auto-adjust width/height from latent input: {e}")
+
         result = encode_vace_advanced(positive, negative, vae, width, height, length, batch_size,
                                       vace_strength_1=vace_strength_1, vace_strength_2=vace_strength_2,
                                       vace_ref_strength_1=vace_ref_strength_1, vace_ref_strength_2=vace_ref_strength_2,
