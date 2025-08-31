@@ -265,8 +265,8 @@
         "fp8_e4m3fn",
         "fp16",
         false,
-        "auto",
-        true
+        "disabled",
+        false
       ],
       "color": "#223",
       "bgcolor": "#335"
