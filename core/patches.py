@@ -74,11 +74,14 @@ def wrap_vace_phantom_wan_model(model):
                 
                 # Use the patched forward_orig method
                 from unittest.mock import patch
+                import types
                 
-                forward_function = _vaceph_forward_orig
-                context = patch.multiple(
+                forward_method = types.MethodType(_vaceph_forward_orig, diffusion_model)
+                
+                context = patch.object(
                     diffusion_model,
-                    forward_orig=forward_function.__get__(diffusion_model, diffusion_model.__class__)
+                    'forward_orig',
+                    forward_method
                 )
                 
                 with context:
