@@ -1,6 +1,7 @@
 import comfy.model_management
 import comfy.model_patcher
 import logging
+import types
 
 """
 VaceWanModel patching system for handling per-frame strength values.
@@ -16,92 +17,85 @@ def wrap_vace_phantom_wan_model(model):
     """
     Patch a VaceWanModel to support per-frame strength and Phantom embeds.
     Based on the WanVideoTeaCacheKJ implementation in comfyui-kjnodes.
+    Note: The model should already be cloned before passing to this function.
     """
-    model_clone = model.clone()
     
     # Check if this is a VaceWanModel
-    diffusion_model = model_clone.get_model_object("diffusion_model")
+    diffusion_model = model.get_model_object("diffusion_model")
     if not isinstance(diffusion_model, comfy.ldm.wan.model.VaceWanModel):
         logging.info("Not a VaceWanModel, skipping per-frame strength patch")
-        return model_clone
+        return model
     
-    def outer_wrapper():
-        def unet_wrapper_function(model_function, kwargs):
-            # Extract parameters from kwargs
-            input_data = kwargs["input"]
-            timestep = kwargs["timestep"] 
-            c = kwargs["c"]
+    def unet_wrapper_function(model_function, kwargs):
+        # Extract parameters from kwargs
+        input_data = kwargs["input"]
+        timestep = kwargs["timestep"] 
+        c = kwargs["c"]
+        
+        vace_strength = c.get("vace_strength", [1.0])
+
+        # Check if we have nested lists (our separate reference strength format)
+        use_patched_forward_orig = (
+            isinstance(vace_strength, list) and 
+            len(vace_strength) > 0 and
+            isinstance(vace_strength[0], list)
+        )
+
+        # Also check if we have Phantom concats (c.get("time_dim_concat") exists and is a tensor)
+        use_patched_forward_orig = use_patched_forward_orig or (
+            c.get("time_dim_concat") is not None and
+            isinstance(c.get("time_dim_concat"), torch.Tensor)
+        )
+
+        if use_patched_forward_orig:
+            # Extract frame count information from conditioning
+            phantom_frames = 0
+            reference_frames = 0
             
-            vace_strength = c.get("vace_strength", [1.0])
-
-            # Check if we have nested lists (our separate reference strength format)
-            use_patched_forward_orig = (
-                isinstance(vace_strength, list) and 
-                len(vace_strength) > 0 and
-                isinstance(vace_strength[0], list)
-            )
-
-            # Also check if we have Phantom concats (c.get("time_dim_concat") exists and is a tensor)
-            use_patched_forward_orig = use_patched_forward_orig or (
-                c.get("time_dim_concat") is not None and
-                isinstance(c.get("time_dim_concat"), torch.Tensor)
-            )
-
-            if use_patched_forward_orig:
-                # Extract frame count information from conditioning
-                phantom_frames = 0
-                reference_frames = 0
-                
-                # Check for phantom frames from time_dim_concat
-                time_dim_concat = c.get("time_dim_concat")
-                if time_dim_concat is not None and isinstance(time_dim_concat, torch.Tensor):
-                    phantom_frames = time_dim_concat.shape[2]  # temporal dimension
-                
-                # Check for reference frames from c['vace_context']
-                vace_context = c.get("vace_context")
-                if vace_context is None or not isinstance(vace_context, torch.Tensor):
-                    raise ValueError("vace_context is missing or not a tensor")
-                else:
-                    total_frames = vace_context.shape[-3]
-                    control_frames = input_data.shape[-3]
-                    reference_frames = total_frames - control_frames - phantom_frames
-                    if reference_frames < 0:
-                        raise ValueError("Reference frames count cannot be negative. Check vace_context and input data shapes.")
-                
-                # Store frame counts in conditioning for the patched function
-                c["_vace_reference_frames"] = reference_frames
-                c["_vace_phantom_frames"] = phantom_frames
-                
-                # Use the patched forward_orig method
-                from unittest.mock import patch
-                import types
-                
-                forward_method = types.MethodType(_vaceph_forward_orig, diffusion_model)
-                
-                context = patch.object(
-                    diffusion_model,
-                    'forward_orig',
-                    forward_method
-                )
-                
-                with context:
-                    out = model_function(input_data, timestep, **c)
+            # Check for phantom frames from time_dim_concat
+            time_dim_concat = c.get("time_dim_concat")
+            if time_dim_concat is not None and isinstance(time_dim_concat, torch.Tensor):
+                phantom_frames = time_dim_concat.shape[2]  # temporal dimension
+            
+            # Check for reference frames from c['vace_context']
+            vace_context = c.get("vace_context")
+            if vace_context is None or not isinstance(vace_context, torch.Tensor):
+                raise ValueError("vace_context is missing or not a tensor")
             else:
-                # Use original behavior
-                out = model_function(input_data, timestep, **c)
+                total_frames = vace_context.shape[-3]
+                control_frames = input_data.shape[-3]
+                reference_frames = total_frames - control_frames - phantom_frames
+                if reference_frames < 0:
+                    raise ValueError("Reference frames count cannot be negative. Check vace_context and input data shapes.")
             
-            return out
-        return unet_wrapper_function
+            # Store frame counts in conditioning for the patched function
+            c["_vace_reference_frames"] = reference_frames
+            c["_vace_phantom_frames"] = phantom_frames
+            
+            diffusion_model = model.get_model_object("diffusion_model")
+            
+            original_forward = diffusion_model.forward_orig
+            diffusion_model.forward_orig = types.MethodType(_vaceph_forward_orig, diffusion_model)
+            try:
+                out = model_function(input_data, timestep, **c)
+            finally:
+                diffusion_model.forward_orig = original_forward
+        else:
+            # Use original behavior
+            out = model_function(input_data, timestep, **c)
+        
+        return out
     
-    model_clone.set_model_unet_function_wrapper(outer_wrapper())
+    model.set_model_unet_function_wrapper(unet_wrapper_function)
     
     logging.info("WanVaceAdvanced model patch applied")
-    return model_clone
+    return model
 
 
 def unwrap_vace_phantom_wan_model(model):
     """
     Remove the patch from a VaceWanModel.
+    Note: Returns a fresh clone without the patch.
     """
     model_clone = model.clone()
     logging.info("WanVaceAdvanced model patch removed")
