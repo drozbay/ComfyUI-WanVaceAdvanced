@@ -37,6 +37,8 @@ class WanVacePhantomSimple:
 
     CATEGORY = "WanVaceAdvanced"
 
+    DEPRECATED = True
+
     def encode(self, positive, negative, vae, width, height, length, batch_size,
                vace_strength=1.0, vace_ref_strength=1.0,
                control_video=None, control_masks=None, vace_reference=None, phantom_images=None):
@@ -90,6 +92,8 @@ class WanVacePhantomDual:
     FUNCTION = "encode"
 
     CATEGORY = "WanVaceAdvanced"
+
+    DEPRECATED = True
 
     def encode(self, positive, negative, vae, width, height, length, batch_size,
                vace_strength=1.0, vace_strength2=1.0, vace_ref_strength=1.0, vace_ref_strength2=1.0,
@@ -146,6 +150,7 @@ class WanVacePhantomExperimental:
     CATEGORY = "WanVaceAdvanced"
 
     EXPERIMENTAL = True
+    DEPRECATED = True
 
     def encode(self, positive, negative, vae, width, height, length, batch_size,
                vace_strength=1.0, vace_strength2=1.0, vace_ref_strength=None, vace_ref_strength2=None,
