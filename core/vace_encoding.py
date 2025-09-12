@@ -121,7 +121,14 @@ def encode_vace_advanced(positive, negative, vae, width, height, length, batch_s
         control_video_1=None, control_masks_1=None, vace_reference_1=None,
         control_video_2=None, control_masks_2=None, vace_reference_2=None,
         phantom_images=None, phantom_mask_value=1.0, phantom_control_value=0.0, phantom_vace_strength=0.0,
+        wva_options=None
         ):
+    
+    def _encode_latent(pixels):
+        if wva_options is not None and wva_options.use_tiled_vae:
+            return vae.encode_tiled(pixels, tile_x=512, tile_y=512, overlap=64, tile_t=64, overlap_t=8)
+        else:
+            return vae.encode(pixels)
     
     def _create_vace_lists(_control_video, _control_masks, _reference_image, _vace_strength, _vace_ref_strength):
 
@@ -158,7 +165,7 @@ def encode_vace_advanced(positive, negative, vae, width, height, length, batch_s
         vace_references_encoded = None
         if _reference_image is not None:
             vace_references_scaled = comfy.utils.common_upscale(_reference_image[:].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
-            vace_references_encoded = vae.encode(vace_references_scaled[:, :, :, :3])
+            vace_references_encoded = _encode_latent(vace_references_scaled[:, :, :, :3])
             vace_references_encoded = torch.cat([vace_references_encoded, comfy.latent_formats.Wan21().process_out(torch.zeros_like(vace_references_encoded))], dim=1)
             num_ref_frames = vace_references_encoded.shape[2]  # Get the number of reference frames
             if not isinstance(_vace_strength, list):
@@ -215,8 +222,8 @@ def encode_vace_advanced(positive, negative, vae, width, height, length, batch_s
         inactive = (_control_video * (1 - masks_latent)) + 0.5
         reactive = (_control_video * masks_latent) + 0.5
 
-        inactive = vae.encode(inactive[:, :, :, :3])
-        reactive = vae.encode(reactive[:, :, :, :3])
+        inactive = _encode_latent(inactive[:, :, :, :3])
+        reactive = _encode_latent(reactive[:, :, :, :3])
         control_video_latent = torch.cat((inactive, reactive), dim=1)
         if vace_references_encoded is not None:
             control_video_latent = torch.cat((vace_references_encoded, control_video_latent), dim=2)
@@ -295,7 +302,7 @@ def encode_vace_advanced(positive, negative, vae, width, height, length, batch_s
         phantom_images_scaled = comfy.utils.common_upscale(phantom_images[:num_phantom_images].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
         latent_images = []
         for i in phantom_images_scaled:
-            latent_images += [vae.encode(i.unsqueeze(0)[:, :, :, :3])]
+            latent_images += [_encode_latent(i.unsqueeze(0)[:, :, :, :3])]
         concat_latent_image = torch.cat(latent_images, dim=2)
 
         # Check if there's already a phantom embedding and warn if overwriting

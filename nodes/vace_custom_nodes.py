@@ -6,6 +6,7 @@ import comfy.latent_formats
 import logging
 
 from ..core.vace_encoding import encode_vace_advanced
+from ..core.utils import WVAOptions
 
 class WanVacePhantomSimple:
     def __init__(self) -> None:
@@ -847,6 +848,24 @@ def _apply_to_latent_dict(obj, ref_shape, modify_func, *args, **kwargs):
     return obj
 
 
+class WVAOptionsNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {},
+            "optional": {
+                "use_tiled_vae": ("BOOLEAN", {"default": False, })
+            }
+        }
+    
+    RETURN_TYPES = ("WVA_OPTIONS",)
+    FUNCTION = "create_options"
+    CATEGORY = "WanVaceAdvanced"
+    
+    def create_options(self, use_tiled_vae=False):
+        return (WVAOptions(use_tiled_vae=use_tiled_vae),)
+
+
 
 NODE_CLASS_MAPPINGS = {
     "WanVacePhantomSimple": WanVacePhantomSimple,
@@ -870,4 +889,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WanVaceToVideoLatent": "WanVaceToVideoLatent",
     "VaceAdvancedModelPatch": "VaceAdvancedModelPatch",
     "VaceStrengthTester": "VaceStrengthTester",
+    "WVAOptionsNode": "WanVaceAdvancedOptions",
 }
