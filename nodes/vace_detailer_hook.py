@@ -281,39 +281,6 @@ class VACEAdvDetailerHook(DetailerHook if DetailerHook else object):
         
         return positive_out, negative_out
     
-    def _debug_save_reference_images(self, phantom_images, prefix="phantom", seg_index=None):
-        if not self.get_option('debug_save_images', False):
-            return
-            
-        if phantom_images is None:
-            return
-            
-        try:
-            import tempfile
-            import os
-            from PIL import Image
-            import numpy as np
-            
-            temp_dir = os.path.join(tempfile.gettempdir(), "vace_phantom_debug")
-            os.makedirs(temp_dir, exist_ok=True)
-            
-            num_frames = phantom_images.shape[0]
-            
-            for frame_idx in range(num_frames):
-                frame_tensor = phantom_images[frame_idx]
-                img_np = frame_tensor.detach().cpu().numpy()
-                img_np = np.clip(img_np, 0.0, 1.0)
-                img_np = (img_np * 255).astype(np.uint8)
-                seg_str = f"_seg{seg_index}" if seg_index is not None else ""
-                filename = f"{prefix}_frame{frame_idx:03d}{seg_str}.png"
-                filepath = os.path.join(temp_dir, filename)
-                img = Image.fromarray(img_np)
-                img.save(filepath)
-            
-            wan_print(f"Saved {num_frames} {prefix} debug images to {temp_dir}")
-            
-        except Exception as e:
-            wan_print(f"Error saving {prefix} debug images: {e}")
     
     def _adjust_latent_for_patch_size(self, latent_image):
         if 'samples' not in latent_image:
@@ -536,13 +503,18 @@ class VACEAdvDetailerHookProvider:
         if not IMPACT_PACK_AVAILABLE:
             raise RuntimeError("Impact Pack is required for VACE DetailerHook functionality. Please install ComfyUI-Impact-Pack.")
         
+        if wva_options is not None:
+            if wva_pipe.wva_options is not None:
+                wan_print("Warning: Overriding WVAPipe WVAOptions with DetailerHook WVAOptions")
+            wva_pipe.wva_options = wva_options
+        
         alignment_config = {
             'latent_pad_direction': latent_pad_direction,
             'crop_calculation_from': crop_calculation_from,
             'wva_pipe': wva_pipe,
             'wva_options': wva_options,
         }
-        
+
         hook = VACEAdvDetailerHook(segs=segs, alignment_config=alignment_config)
         return (hook,)
 

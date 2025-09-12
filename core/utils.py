@@ -170,3 +170,44 @@ def resize_with_edge_padding(image, target_width, target_height):
         padded_image[b, pad_top:pad_top+new_height, pad_left:pad_left+new_width, :] = resized_b
     
     return padded_image
+
+def debug_save_images(image_frames, prefix="phantom", seg_index=None):
+    if image_frames is None:
+        return
+        
+    try:
+        import os
+        from PIL import Image
+        import numpy as np
+        import folder_paths
+        
+        temp_dir = os.path.join(folder_paths.get_temp_directory(), "vace_advanced_debug")
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        num_frames = image_frames.shape[0]
+        
+        for frame_idx in range(num_frames):
+            frame_tensor = image_frames[frame_idx]
+            img_np = frame_tensor.detach().cpu().numpy()
+            img_np = np.clip(img_np, 0.0, 1.0)
+            img_np = (img_np * 255).astype(np.uint8)
+            seg_str = f"_seg{seg_index}" if seg_index is not None else ""
+            base_filename = f"{prefix}_frame{frame_idx:03d}{seg_str}"
+            
+            counter = 0
+            filename = f"{base_filename}.png"
+            filepath = os.path.join(temp_dir, filename)
+            
+            while os.path.exists(filepath):
+                counter += 1
+                filename = f"{base_filename}_{counter:03d}.png"
+                filepath = os.path.join(temp_dir, filename)
+            
+            img = Image.fromarray(img_np)
+            img.save(filepath)
+        
+        wan_print(f"Saved {num_frames} {prefix} debug images to {temp_dir}")
+        
+    except Exception as e:
+        wan_print(f"Error saving {prefix} debug images: {e}")
+

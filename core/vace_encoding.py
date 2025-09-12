@@ -4,7 +4,7 @@ import comfy.latent_formats
 import comfy.model_management
 import node_helpers
 
-from .utils import resize_with_edge_padding
+from .utils import resize_with_edge_padding, debug_save_images
 
 def _reconcile_vace_embedding_lengths(vace_frames_list, vace_mask_list, vace_strength_list):
     if not vace_frames_list or len(vace_frames_list) == 0:
@@ -167,6 +167,8 @@ def encode_vace_advanced(positive, negative, vae, width, height, length, batch_s
         vace_references_encoded = None
         if _reference_image is not None:
             vace_references_scaled = comfy.utils.common_upscale(_reference_image[:].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
+            if wva_options is not None and getattr(wva_options, 'debug_save_images', False):
+                debug_save_images(vace_references_scaled, prefix="vace_reference")
             vace_references_encoded = _encode_latent(vace_references_scaled[:, :, :, :3])
             vace_references_encoded = torch.cat([vace_references_encoded, comfy.latent_formats.Wan21().process_out(torch.zeros_like(vace_references_encoded))], dim=1)
             num_ref_frames = vace_references_encoded.shape[2]  # Get the number of reference frames
@@ -310,6 +312,8 @@ def encode_vace_advanced(positive, negative, vae, width, height, length, batch_s
             phantom_images_scaled = resize_with_edge_padding(phantom_images[:num_phantom_images], width, height)
         else: # phantom_resize_mode = "center"
             phantom_images_scaled = comfy.utils.common_upscale(phantom_images[:num_phantom_images].movedim(-1, 1), width, height, "lanczos", "center").movedim(1, -1)
+        if wva_options is not None and getattr(wva_options, 'debug_save_images', False):
+            debug_save_images(phantom_images_scaled, prefix="phantom", seg_index=None)
             
         latent_images = []
         for i in phantom_images_scaled:
