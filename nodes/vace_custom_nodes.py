@@ -6,7 +6,7 @@ import comfy.latent_formats
 import logging
 
 from ..core.vace_encoding import encode_vace_advanced
-from ..core.utils import WVAOptions
+from ..core.utils import WVAOptions, WVAPipe
 
 class WanVacePhantomSimple:
     def __init__(self) -> None:
@@ -379,7 +379,11 @@ class WanVacePhantomExperimentalV2:
                             "vace_ref_strength_2": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
                             # Phantom inputs
                             "phantom_images": ("IMAGE", ),
-                            "phantom_vace_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000.0, "step": 0.01, "tooltip": "Vace strength value for the Phantom embed region."})
+                            "phantom_mask_value": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Vace mask value for the Phantom embed region."}),
+                            "phantom_control_value": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Padded vace embedded latents value for the Phantom embed region."}),
+                            "phantom_vace_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000.0, "step": 0.01, "tooltip": "Vace strength value for the Phantom embed region. (Read: *NOT* the strength of the Phantom embeds, just the strength of the Vace embedding applied to the Phantom region.)"}),
+                            # WVA Options
+                            "wva_options": ("WVA_OPTIONS", {}),
                 }}
 
     RETURN_TYPES = ("MODEL", "CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT", "INT",)
@@ -394,7 +398,8 @@ class WanVacePhantomExperimentalV2:
                vace_strength_1=1.0, vace_strength_2=1.0, vace_ref_strength_1=None, vace_ref_strength_2=None,
                control_video_1=None, control_masks_1=None, vace_reference_1=None,
                control_video_2=None, control_masks_2=None, vace_reference_2=None,
-               phantom_images=None, phantom_mask_value=1.0, phantom_control_value=0.0, phantom_vace_strength=1.0
+               phantom_images=None, phantom_mask_value=1.0, phantom_control_value=0.0, phantom_vace_strength=1.0,
+               wva_options=None,
                ):
         
         # If a latent input is provided, ensure the node width/height match the latent's decoded pixel size.
@@ -423,6 +428,7 @@ class WanVacePhantomExperimentalV2:
                                       control_masks_2=control_masks_2, vace_reference_2=vace_reference_2,
                                       phantom_images=phantom_images, phantom_mask_value=phantom_mask_value,
                                       phantom_control_value=phantom_control_value, phantom_vace_strength=phantom_vace_strength,
+                                      wva_options=wva_options
                                       )
         
         # Unpack the result
@@ -561,7 +567,6 @@ class VaceAdvancedModelPatch:
         return {
             "required": {
                 "model": ("MODEL",),
-                "enable": ("BOOLEAN", {"default": True}),
             }
         }
     
@@ -569,24 +574,9 @@ class VaceAdvancedModelPatch:
     FUNCTION = "patch_model"
     CATEGORY = "WanVaceAdvanced"
     
-    def patch_model(self, model, enable):
-        """
-        Wrap or unwrap the VaceWanModel to enable/disable per-frame strength support.
-        
-        Args:
-            model: The model to patch
-            enable: Whether to enable or disable per-frame strength support
-            
-        Returns:
-            The patched model
-        """
-        # Clone the model to avoid modifying the original
+    def patch_model(self, model,):
         m = model.clone()
-        
-        if enable:
-            m = wrap_vace_phantom_wan_model(m)
-        else:
-            m = unwrap_vace_phantom_wan_model(m)
+        m = wrap_vace_phantom_wan_model(m)
 
         return (m,)
 
@@ -791,7 +781,7 @@ def _process_incoming_latent(latent_in, latent_out, height, width, length, vace_
 
     return latent_out
 
-# Local latent handling (compatible with RES4LYF but independent)
+# Local latent handling (compatible with RES4LYF)
 def _apply_to_latent_dict(obj, ref_shape, modify_func, *args, **kwargs):
 
     """
@@ -848,23 +838,75 @@ def _apply_to_latent_dict(obj, ref_shape, modify_func, *args, **kwargs):
     return obj
 
 
+class WVAPipeSimple:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "vace_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
+            },
+            "optional": {
+                "control_video": ("IMAGE",),
+                "control_masks": ("MASK",),
+                "vace_reference": ("IMAGE",),
+                "phantom_images": ("IMAGE",),
+                "vace_ref_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
+                "vae": ("VAE", {"tooltip": "VAE for encoding VACE data in DetailerHook"}),
+            }
+        }
+    
+    RETURN_TYPES = ("WVA_PIPE",)
+    RETURN_NAMES = ("wva_pipe",)
+    FUNCTION = "create_pipe"
+    CATEGORY = "WanVaceAdvanced"
+    
+    def create_pipe(self, vace_strength=1.0, control_video=None, control_masks=None, 
+                    vace_reference=None, phantom_images=None, vace_ref_strength=None, vae=None):
+        
+        pipe = WVAPipe(
+            control_video_1=control_video,
+            control_masks_1=control_masks,
+            vace_reference_1=vace_reference,
+            vace_strength_1=vace_strength,
+            vace_ref_strength_1=vace_ref_strength,
+            phantom_images=phantom_images,
+            vae=vae
+        )
+        
+        return (pipe,)
+
+
 class WVAOptionsNode:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {},
             "optional": {
-                "use_tiled_vae": ("BOOLEAN", {"default": False, })
+                "use_tiled_vae": ("BOOLEAN", {"default": False, "tooltip": "Use tiled VAE encoding for large images"}),
+                "enable_debug_prints": ("BOOLEAN", {"default": True, "tooltip": "Enable detailed debugging output"}),
+                "debug_save_phantom": ("BOOLEAN", {"default": False, "tooltip": "Save phantom images to temp folder for debugging"}),
+                "phantom_resize_mode": (["center", "pad_edge"], {"default": "center", "tooltip": "How to resize phantom images: center=crop to fit, pad_edge=preserve aspect ratio with edge padding"}),
+                "phantom_combined_negative": ("BOOLEAN", {"default": False, "tooltip": "Use Conditioning (Combine) for phantom negative conditioning."}),
             }
         }
     
     RETURN_TYPES = ("WVA_OPTIONS",)
+    RETURN_NAMES = ("wva_options",)
     FUNCTION = "create_options"
     CATEGORY = "WanVaceAdvanced"
     
-    def create_options(self, use_tiled_vae=False):
-        return (WVAOptions(use_tiled_vae=use_tiled_vae),)
-
+    def create_options(self, use_tiled_vae=False, phantom_resize_mode="center", 
+                      enable_debug_prints=True, debug_save_phantom=False, phantom_combined_negative=False):
+        
+        options = WVAOptions(
+            use_tiled_vae=use_tiled_vae,
+            enable_debug_prints=enable_debug_prints,
+            debug_save_images=debug_save_phantom,
+            phantom_resize_mode=phantom_resize_mode,
+            phantom_combined_negative=phantom_combined_negative
+        )
+        
+        return (options,)
 
 
 NODE_CLASS_MAPPINGS = {
@@ -877,6 +919,8 @@ NODE_CLASS_MAPPINGS = {
     "WanVaceToVideoLatent": WanVaceToVideoLatent,
     "VaceAdvancedModelPatch": VaceAdvancedModelPatch,
     "VaceStrengthTester": VaceStrengthTester,
+    "WVAPipeSimple": WVAPipeSimple,
+    "WVAOptionsNode": WVAOptionsNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -889,5 +933,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WanVaceToVideoLatent": "WanVaceToVideoLatent",
     "VaceAdvancedModelPatch": "VaceAdvancedModelPatch",
     "VaceStrengthTester": "VaceStrengthTester",
-    "WVAOptionsNode": "WanVaceAdvancedOptions",
+    "WVAPipeSimple": "WVAPipeSimple",
+    "WVAOptionsNode": "WVAOptions",
 }

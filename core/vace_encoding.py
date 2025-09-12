@@ -4,6 +4,8 @@ import comfy.latent_formats
 import comfy.model_management
 import node_helpers
 
+from .utils import resize_with_edge_padding
+
 def _reconcile_vace_embedding_lengths(vace_frames_list, vace_mask_list, vace_strength_list):
     if not vace_frames_list or len(vace_frames_list) == 0:
         return vace_frames_list, vace_mask_list, vace_strength_list
@@ -299,7 +301,16 @@ def encode_vace_advanced(positive, negative, vae, width, height, length, batch_s
     neg_phant_img = negative  # This becomes negative_img_text (with zeros)
 
     if phantom_images is not None:
-        phantom_images_scaled = comfy.utils.common_upscale(phantom_images[:num_phantom_images].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
+        # Check phantom resize mode from wva_options
+        phantom_resize_mode = "center"
+        if wva_options is not None:
+            phantom_resize_mode = getattr(wva_options, 'phantom_resize_mode', "center")
+        
+        if phantom_resize_mode == "pad_edge":
+            phantom_images_scaled = resize_with_edge_padding(phantom_images[:num_phantom_images], width, height)
+        else: # phantom_resize_mode = "center"
+            phantom_images_scaled = comfy.utils.common_upscale(phantom_images[:num_phantom_images].movedim(-1, 1), width, height, "lanczos", "center").movedim(1, -1)
+            
         latent_images = []
         for i in phantom_images_scaled:
             latent_images += [_encode_latent(i.unsqueeze(0)[:, :, :, :3])]
