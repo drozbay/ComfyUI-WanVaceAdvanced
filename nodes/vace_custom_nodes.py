@@ -908,6 +908,42 @@ class WVAOptionsNode:
         
         return (options,)
 
+# Based on StringToFloatList from ComfyUI-KJNodes (https://github.com/kijai/ComfyUI-KJNodes/blob/e81f33508b0821ea2f53f4f46a833fa6215626bd/nodes/nodes.py#L1021)
+class StringToFloatListRanged:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                    "string" :("STRING", {"default": "1, 2, 3#2, 5.5", "multiline": True}),
+                    }
+                }
+    RETURN_TYPES = ("FLOAT",)
+    RETURN_NAMES = ("FLOAT",)
+    CATEGORY = "drozpack"
+    FUNCTION = "createlist"
+    DESCRIPTION = "Converts a comma-separated string to a float list. Supports repeat notation using '#' (e.g., '3#5' repeats 3.0 five times). Mix regular numbers and repeats: '1, 2.5#3, 7' becomes [1.0, 2.5, 2.5, 2.5, 7.0]."
+
+    def createlist(self, string):
+        import re
+
+        result = []
+        items = [x.strip() for x in string.split(',')]
+            
+        # Pattern for number#count notation
+        repeat_pattern = r'^(-?\d+(?:\.\d+)?)#(\d+)$'
+
+        for item in items:
+            match = re.match(repeat_pattern, item)
+            if match:
+                # Repeat notation: number#count
+                number = float(match.group(1))
+                count = int(match.group(2))
+                result.extend([number] * count)
+            else:
+                # Regular number
+                result.append(float(item))
+            
+        return (result,)
 
 NODE_CLASS_MAPPINGS = {
     "WanVacePhantomSimple": WanVacePhantomSimple,
@@ -921,6 +957,7 @@ NODE_CLASS_MAPPINGS = {
     "VaceStrengthTester": VaceStrengthTester,
     "WVAPipeSimple": WVAPipeSimple,
     "WVAOptionsNode": WVAOptionsNode,
+    "StringToFloatListRanged": StringToFloatListRanged,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -935,4 +972,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "VaceStrengthTester": "VaceStrengthTester",
     "WVAPipeSimple": "WVAPipeSimple",
     "WVAOptionsNode": "WVAOptions",
+    "StringToFloatListRanged": "StringToFloatListRanged",
 }
