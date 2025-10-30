@@ -919,7 +919,7 @@ class StringToFloatListRanged:
                 }
     RETURN_TYPES = ("FLOAT",)
     RETURN_NAMES = ("FLOAT",)
-    CATEGORY = "drozpack"
+    CATEGORY = "WanVaceAdvanced"
     FUNCTION = "createlist"
     DESCRIPTION = "Converts a comma-separated string to a float list. Supports repeat notation using '#' (e.g., '3#5' repeats 3.0 five times). Mix regular numbers and repeats: '1, 2.5#3, 7' becomes [1.0, 2.5, 2.5, 2.5, 7.0]."
 
