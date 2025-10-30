@@ -151,20 +151,19 @@ def resize_with_edge_padding(image, target_width, target_height):
         
         # Get edge colors for padding
         if new_height > 0 and new_width > 0:
-            top_edge = resized_b[0, :, :].mean(dim=0)  # Average of top row
-            bottom_edge = resized_b[new_height-1, :, :].mean(dim=0)  # Average of bottom row
-            left_edge = resized_b[:, 0, :].mean(dim=0)  # Average of left column
-            right_edge = resized_b[:, new_width-1, :].mean(dim=0)  # Average of right column
-            
-            # Fill padded areas with edge colors
+            top_color = resized_b[0, :, :].mean(dim=0)
+            bottom_color = resized_b[new_height - 1, :, :].mean(dim=0)
+            left_color = resized_b[:, 0, :].mean(dim=0)
+            right_color = resized_b[:, new_width - 1, :].mean(dim=0)
+
             if pad_top > 0:
-                padded_image[b, :pad_top, :, :] = top_edge
+                padded_image[b, :pad_top, :, :] = top_color
             if pad_bottom > 0:
-                padded_image[b, pad_top+new_height:, :, :] = bottom_edge
+                padded_image[b, pad_top + new_height:, :, :] = bottom_color
             if pad_left > 0:
-                padded_image[b, :, :pad_left, :] = left_edge.unsqueeze(1).expand(-1, target_width, -1)
+                padded_image[b, :, :pad_left, :] = left_color
             if pad_right > 0:
-                padded_image[b, :, pad_left+new_width:, :] = right_edge.unsqueeze(1).expand(-1, target_width - pad_left - new_width, -1)
+                padded_image[b, :, pad_left + new_width:, :] = right_color
         
         # Place the resized image in the center
         padded_image[b, pad_top:pad_top+new_height, pad_left:pad_left+new_width, :] = resized_b
