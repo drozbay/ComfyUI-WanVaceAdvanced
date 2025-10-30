@@ -3,15 +3,10 @@ import comfy.model_patcher
 import logging
 import types
 
-"""
-VaceWanModel patching system for handling per-frame strength values.
-This section provides a wrapper for the VaceWanModel that supports separate
-strength values for reference frames and control frames.
-"""
-
 import torch
 import comfy.ldm.wan.model
 from comfy.ldm.wan.model import sinusoidal_embedding_1d
+from .utils import wan_print
 
 def wrap_vace_phantom_wan_model(model):
     """
@@ -370,3 +365,84 @@ def _apply_separate_strengths(x, c_skip, strength_list, reference_frames=0, phan
     x += weighted_c_skip
     
     return x
+
+"""
+HuMo I2V patching for WAN21_HuMo models.
+Wraps zero-initialization in concat_latent_image check to enable I2V support.
+"""
+
+def is_wan21_humo_model(model):
+    try:
+        return isinstance(model.model, comfy.model_base.WAN21_HuMo)
+    except Exception as e:
+        logging.warning(f"Error checking model type: {e}")
+        return False
+
+
+def patch_humo_i2v_support(model):
+    if not is_wan21_humo_model(model):
+        wan_print(f"Warning: Model type is {type(model.model).__name__}, not WAN21_HuMo")
+        raise ValueError("This patch is only compatible with WAN21_HuMo models")
+
+    model_obj = model.model
+
+    if hasattr(model_obj, '_humo_i2v_patched'):
+        wan_print("Model already has HuMo I2V patch applied, skipping")
+        return model
+
+    def patched_extra_conds(self, **kwargs):
+        out = super(type(self), self).extra_conds(**kwargs)
+        noise = kwargs.get("noise", None)
+        audio_embed = kwargs.get("audio_embed", None)
+
+        if audio_embed is not None:
+            out['audio_embed'] = comfy.conds.CONDRegular(audio_embed)
+
+        concat_latent_image = kwargs.get("concat_latent_image", None)
+
+        if "c_concat" not in out:
+            reference_latents = kwargs.get("reference_latents", None)
+            if reference_latents is not None:
+                out['reference_latent'] = comfy.conds.CONDRegular(self.process_latent_in(reference_latents[-1]))
+        else:
+            if concat_latent_image is None:
+                noise_shape = list(noise.shape)
+                noise_shape[1] += 4
+                concat_latent = torch.zeros(noise_shape, device=noise.device, dtype=noise.dtype)
+                zero_vae_values_first = torch.tensor([0.8660, -0.4326, -0.0017, -0.4884, -0.5283, 0.9207, -0.9896, 0.4433, -0.5543, -0.0113, 0.5753, -0.6000, -0.8346, -0.3497, -0.1926, -0.6938]).view(1, 16, 1, 1, 1)
+                zero_vae_values_second = torch.tensor([1.0869, -1.2370, 0.0206, -0.4357, -0.6411, 2.0307, -1.5972, 1.2659, -0.8595, -0.4654, 0.9638, -1.6330, -1.4310, -0.1098, -0.3856, -1.4583]).view(1, 16, 1, 1, 1)
+                zero_vae_values = torch.tensor([0.8642, -1.8583, 0.1577, 0.1350, -0.3641, 2.5863, -1.9670, 1.6065, -1.0475, -0.8678, 1.1734, -1.8138, -1.5933, -0.7721, -0.3289, -1.3745]).view(1, 16, 1, 1, 1)
+                concat_latent[:, 4:] = zero_vae_values
+                concat_latent[:, 4:, :1] = zero_vae_values_first
+                concat_latent[:, 4:, 1:2] = zero_vae_values_second
+                out['c_concat'] = comfy.conds.CONDNoiseShape(concat_latent)
+
+            reference_latents = kwargs.get("reference_latents", None)
+            if reference_latents is not None:
+                ref_latent = self.process_latent_in(reference_latents[-1])
+                ref_latent_shape = list(ref_latent.shape)
+                ref_latent_shape[1] += 4 + ref_latent_shape[1]
+                ref_latent_full = torch.zeros(ref_latent_shape, device=ref_latent.device, dtype=ref_latent.dtype)
+                ref_latent_full[:, 20:] = ref_latent
+                ref_latent_full[:, 16:20] = 1.0
+                out['reference_latent'] = comfy.conds.CONDRegular(ref_latent_full)
+
+        return out
+
+    model_obj.extra_conds = types.MethodType(patched_extra_conds, model_obj)
+    model_obj._humo_i2v_patched = True
+
+    wan_print("HuMo I2V patch applied successfully")
+    return model
+
+
+def unpatch_humo_i2v_support(model):
+    if not is_wan21_humo_model(model):
+        return model
+
+    if not hasattr(model.model, '_humo_i2v_patched'):
+        return model
+
+    delattr(model.model, '_humo_i2v_patched')
+    wan_print("HuMo I2V patch removed")
+    return model
