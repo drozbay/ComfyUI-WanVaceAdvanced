@@ -20,7 +20,13 @@ def wrap_vace_phantom_wan_model(model):
     if not isinstance(diffusion_model, comfy.ldm.wan.model.VaceWanModel):
         logging.info("Not a VaceWanModel, skipping per-frame strength patch")
         return model
-    
+
+    # Register context windows callbacks if context windows are enabled
+    context_handler = model.model_options.get("context_handler")
+    if context_handler is not None:
+        from .context_windows_hook import register_vace_context_windows_callbacks
+        register_vace_context_windows_callbacks(model, context_handler)
+
     def unet_wrapper_function(model_function, kwargs):
         # Extract parameters from kwargs
         input_data = kwargs["input"]
