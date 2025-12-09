@@ -733,6 +733,9 @@ def _process_incoming_latent(latent_in, latent_out, height, width, length, vace_
             # process the latent based on our decision
             ref_shape = latent_samples.shape
                     
+            # Check for noise_mask that needs adjustment
+            noise_mask = latent_in.get("noise_mask")
+
             if our_ref_frames > 0:
                 # We have new reference frames
                 if detected_ref_frames > 0:
@@ -745,6 +748,19 @@ def _process_incoming_latent(latent_in, latent_out, height, width, length, vace_
                     processed_latent = _apply_to_latent_dict(
                         latent_in, ref_shape, _add_reference_frames, our_ref_frames
                     )
+
+                    if noise_mask is not None:
+                        # Calculate how many mask frames to prepend (eg. for reference frames)
+                        # mask is [T, 1, H, W], latent is [B, C, T_latent, H, W]
+                        mask_temporal = noise_mask.shape[0]
+                        frames_per_latent = mask_temporal / actual_latent_frames
+                        mask_frames_to_add = max(1, int(round(frames_per_latent * our_ref_frames)))
+
+                        mask_padding = torch.ones((mask_frames_to_add,) + noise_mask.shape[1:], device=noise_mask.device, dtype=noise_mask.dtype)
+                        noise_mask = torch.cat([mask_padding, noise_mask], dim=0)
+
+                        processed_latent = dict(processed_latent)
+                        processed_latent["noise_mask"] = noise_mask
             else:
                 # We have no new reference frames
                 if detected_ref_frames > 0:
