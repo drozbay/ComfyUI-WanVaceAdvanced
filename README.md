@@ -10,7 +10,7 @@ Advanced VACE nodes for Wan video models in ComfyUI.
 
 ## Overview
 
-This node pack provides advanced VACE functionality for Wan video generation, allowing fine-grained control over Vace frame strengths with reference images, control videos, and optional phantom embeddings. The V2 nodes offer the most complete feature set with automatic reference frame detection and model integration.
+This node pack provides advanced VACE functionality for Wan video generation, allowing fine-grained control over Vace frame strengths with reference images, control videos, and optional phantom embeddings. The V2 nodes offer the most complete feature set with automatic reference frame detection, model integration, and native context window support so phantom embeddings, per-frame strengths, and masks stay aligned while windows resize or shuffle.
 
 ## Important: Model Patching Required
 
@@ -89,6 +89,19 @@ This example demonstrates:
 - Using WanVacePhantomSimpleV2 with Phantom embeddings
 - Applying VACE control using the "Layout" control method
 - Using a VACE reference to control the setting
+
+## Context Windows Workflow
+
+![Context Windows Screenshot](assets/droz_WanVaceAdvanced_VaceContextWindows_1.0.png)
+
+*Context windows demo - [View workflow](example_workflows/droz_WanVaceAdvanced_VaceContextWindows_1.0.json)*
+
+- Context window support keeps VACE contexts, strength lists, and phantom tails in sync when `WanContextWindowsManual` slices or reorders windows.
+- The sample workflow branches into two `WanContextWindowsManual` stages for high-noise and low-noise sampler stages.
+- The workflow uses the RES4LYF ClownsharKSampler and ClownsharkChainsampler nodes for clean layout.
+- `WanMaskToLatentSpace` (highlighted in the workflow) avoids trilinear blur on fast-motion masks before they flow through the windows.
+- Feeding `latent_in` with a `SetLatentNoiseMask` result is optional but keeps untouched areas stable for continuation shots.
+- Supporting media for the TikTok shuffle-dance example lives under [assets/](assets), including the output example [`assets/WanVacePhantomContextWindows_ExampleAudio.mp4`](assets/WanVacePhantomContextWindows_ExampleAudio.mp4).
 
 ## Chaining Nodes
 
