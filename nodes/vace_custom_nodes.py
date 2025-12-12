@@ -1,6 +1,8 @@
 import nodes
 import node_helpers
 import torch
+import numpy as np
+import scipy.ndimage
 import comfy.model_management
 import comfy.latent_formats
 import logging
@@ -961,6 +963,176 @@ class StringToFloatListRanged:
             
         return (result,)
 
+
+class WanNoiseMaskToLatentSpace:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "mask": ("MASK",),
+                "spatial_method": (["max", "min", "mean", "area", "nearest"], {"default": "max",
+                    "tooltip": "Spatial reduction: max=preserve any coverage, min=require full coverage, mean=average, area=area-based, nearest=nearest-exact"}),
+                "temporal_method": (["max", "min", "mean", "first", "last"], {"default": "max",
+                    "tooltip": "Temporal reduction: max/min/mean across 4-frame groups, or first/last frame only"}),
+            },
+            "optional": {
+                "first_frame_special": ("BOOLEAN", {"default": True,
+                    "tooltip": "True: first frame 1:1, rest grouped by 4. False: all frames grouped by 4 uniformly."}),
+                "target_width": ("INT", {"default": 0, "min": 0, "max": nodes.MAX_RESOLUTION, "step": 8,
+                    "tooltip": "Target latent width. 0 = auto (mask width / 8)"}),
+                "target_height": ("INT", {"default": 0, "min": 0, "max": nodes.MAX_RESOLUTION, "step": 8,
+                    "tooltip": "Target latent height. 0 = auto (mask height / 8)"}),
+                "expand_spatial": ("INT", {"default": 0, "min": -nodes.MAX_RESOLUTION, "max": nodes.MAX_RESOLUTION, "step": 1,
+                    "tooltip": "Pixels to grow (+) or shrink (-) spatially before downscaling"}),
+                "expand_temporal": ("INT", {"default": 0, "min": -1000, "max": 1000, "step": 1,
+                    "tooltip": "Frames to grow (+) or shrink (-) temporally before downscaling"}),
+            }
+        }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    FUNCTION = "convert"
+    CATEGORY = "WanVaceAdvanced"
+
+    def _apply_temporal_reduction(self, frames, method):
+        if method == "max":
+            return frames.max(dim=2)[0]
+        elif method == "min":
+            return frames.min(dim=2)[0]
+        elif method == "mean":
+            return frames.mean(dim=2)
+        elif method == "first":
+            return frames[:, :, 0, :, :]
+        elif method == "last":
+            return frames[:, :, -1, :, :]
+        raise ValueError(f"Unknown temporal method: {method}")
+
+    def _expand_temporal(self, mask_np, expand_temporal):
+        if expand_temporal == 0:
+            return mask_np
+        result = mask_np.copy()
+        footprint = np.ones((3, 1, 1))
+        for _ in range(abs(expand_temporal)):
+            if expand_temporal > 0:
+                result = scipy.ndimage.grey_dilation(result, footprint=footprint, mode='nearest')
+            else:
+                result = scipy.ndimage.grey_erosion(result, footprint=footprint, mode='nearest')
+        return result
+
+    def _expand_spatial(self, mask_np, expand_spatial):
+        if expand_spatial == 0:
+            return mask_np
+        kernel = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]])
+        result = []
+        for frame_idx in range(mask_np.shape[0]):
+            frame = mask_np[frame_idx]
+            for _ in range(abs(expand_spatial)):
+                if expand_spatial < 0:
+                    frame = scipy.ndimage.grey_erosion(frame, footprint=kernel)
+                else:
+                    frame = scipy.ndimage.grey_dilation(frame, footprint=kernel)
+            result.append(frame)
+        return np.stack(result, axis=0)
+
+    def convert(self, mask, spatial_method, temporal_method, first_frame_special=True, target_width=0, target_height=0, expand_spatial=0, expand_temporal=0):
+        import torch.nn.functional as F
+
+        # Apply expansion/shrinking first
+        if expand_temporal != 0 or expand_spatial != 0:
+            if mask.ndim == 2:
+                mask_for_expand = mask.unsqueeze(0)
+            elif mask.ndim == 4:
+                mask_for_expand = mask.squeeze(1) if mask.shape[1] == 1 else mask.squeeze(0)
+            else:
+                mask_for_expand = mask
+            mask_np = mask_for_expand.cpu().numpy()
+            if expand_temporal != 0:
+                mask_np = self._expand_temporal(mask_np, expand_temporal)
+            if expand_spatial != 0:
+                mask_np = self._expand_spatial(mask_np, expand_spatial)
+            mask = torch.from_numpy(mask_np).float()
+
+        # Normalize to [B, T, H, W]
+        if mask.ndim == 2:
+            mask = mask.unsqueeze(0).unsqueeze(0)
+        elif mask.ndim == 3:
+            mask = mask.unsqueeze(0)
+        elif mask.ndim != 4:
+            raise ValueError(f"Unsupported mask dimension: {mask.ndim}")
+
+        B, T, H, W = mask.shape
+        latent_h = target_height if target_height > 0 else H // 8
+        latent_w = target_width if target_width > 0 else W // 8
+
+        if first_frame_special:
+            latent_t = ((T - 1) // 4) + 1 if T > 1 else 1
+        else:
+            latent_t = (T + 3) // 4
+
+        # Spatial reduction
+        mask_spatial = mask.view(B * T, 1, H, W)
+        kernel_h, kernel_w = H // latent_h, W // latent_w
+
+        if spatial_method == "max":
+            if kernel_h > 0 and kernel_w > 0:
+                mask_spatial = F.max_pool2d(mask_spatial, kernel_size=(kernel_h, kernel_w), stride=(kernel_h, kernel_w))
+            if mask_spatial.shape[-2] != latent_h or mask_spatial.shape[-1] != latent_w:
+                mask_spatial = F.interpolate(mask_spatial, size=(latent_h, latent_w), mode='nearest')
+        elif spatial_method == "min":
+            if kernel_h > 0 and kernel_w > 0:
+                mask_spatial = -F.max_pool2d(-mask_spatial, kernel_size=(kernel_h, kernel_w), stride=(kernel_h, kernel_w))
+            if mask_spatial.shape[-2] != latent_h or mask_spatial.shape[-1] != latent_w:
+                mask_spatial = F.interpolate(mask_spatial, size=(latent_h, latent_w), mode='nearest')
+        elif spatial_method == "mean":
+            if kernel_h > 0 and kernel_w > 0:
+                mask_spatial = F.avg_pool2d(mask_spatial, kernel_size=(kernel_h, kernel_w), stride=(kernel_h, kernel_w))
+            if mask_spatial.shape[-2] != latent_h or mask_spatial.shape[-1] != latent_w:
+                mask_spatial = F.interpolate(mask_spatial, size=(latent_h, latent_w), mode='bilinear', align_corners=False)
+        elif spatial_method == "area":
+            mask_spatial = F.interpolate(mask_spatial, size=(latent_h, latent_w), mode='area')
+        elif spatial_method == "nearest":
+            mask_spatial = F.interpolate(mask_spatial, size=(latent_h, latent_w), mode='nearest-exact')
+
+        mask_spatial = mask_spatial.view(B, T, latent_h, latent_w)
+
+        # Temporal reduction
+        if T == 1 or latent_t == 1:
+            mask_out = mask_spatial
+        elif first_frame_special:
+            first_frame = mask_spatial[:, 0:1, :, :]
+            remaining = mask_spatial[:, 1:, :, :]
+            remaining_frames = remaining.shape[1]
+
+            if remaining_frames == 0:
+                mask_out = first_frame
+            else:
+                num_groups = (remaining_frames + 3) // 4
+                if remaining_frames % 4 != 0:
+                    pad_frames = 4 - (remaining_frames % 4)
+                    padding = remaining[:, -1:, :, :].repeat(1, pad_frames, 1, 1)
+                    remaining = torch.cat([remaining, padding], dim=1)
+                remaining = remaining.view(B, num_groups, 4, latent_h, latent_w)
+                remaining_reduced = self._apply_temporal_reduction(remaining, temporal_method)
+                mask_out = torch.cat([first_frame, remaining_reduced], dim=1)
+        else:
+            total_frames = mask_spatial.shape[1]
+            num_groups = (total_frames + 3) // 4
+            if total_frames % 4 != 0:
+                pad_frames = 4 - (total_frames % 4)
+                padding = mask_spatial[:, -1:, :, :].repeat(1, pad_frames, 1, 1)
+                mask_spatial = torch.cat([mask_spatial, padding], dim=1)
+            mask_spatial = mask_spatial.view(B, num_groups, 4, latent_h, latent_w)
+            mask_out = self._apply_temporal_reduction(mask_spatial, temporal_method)
+
+        if mask_out.shape[1] > latent_t:
+            mask_out = mask_out[:, :latent_t, :, :]
+
+        if B == 1:
+            mask_out = mask_out.squeeze(0)
+
+        return (mask_out,)
+
+
 NODE_CLASS_MAPPINGS = {
     "WanVacePhantomSimple": WanVacePhantomSimple,
     "WanVacePhantomDual": WanVacePhantomDual,
@@ -974,6 +1146,7 @@ NODE_CLASS_MAPPINGS = {
     "WVAPipeSimple": WVAPipeSimple,
     "WVAOptionsNode": WVAOptionsNode,
     "StringToFloatListRanged": StringToFloatListRanged,
+    "WanMaskToLatentSpace": WanNoiseMaskToLatentSpace
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -989,4 +1162,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WVAPipeSimple": "WVAPipeSimple",
     "WVAOptionsNode": "WVAOptions",
     "StringToFloatListRanged": "StringToFloatListRanged",
+    "WanNoiseMaskToLatentSpace": "WanNoiseMaskToLatentSpace"
 }
