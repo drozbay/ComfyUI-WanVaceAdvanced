@@ -1,5 +1,6 @@
 import comfy.model_management
 import comfy.model_patcher
+import comfy.conds
 import logging
 import types
 
@@ -7,6 +8,37 @@ import torch
 import comfy.ldm.wan.model
 from comfy.ldm.wan.model import sinusoidal_embedding_1d
 from .utils import wan_print
+
+# List of custom conditioning keys that should be passed through to model_conds
+CUSTOM_PASSTHROUGH_KEYS = [
+    "window_reference_batch",   # Per-window reference images for context windows
+    "window_reference_mapping", # Explicit mapping string for window-to-reference assignment
+]
+
+def _patch_extra_conds_passthrough(model_obj):
+    """
+    Patch extra_conds on a model to pass through custom conditioning keys.
+    """
+    if hasattr(model_obj, '_wva_extra_conds_patched'):
+        return
+
+    original_extra_conds = model_obj.extra_conds
+
+    def patched_extra_conds(self, **kwargs):
+        out = original_extra_conds(**kwargs)
+
+        for key in CUSTOM_PASSTHROUGH_KEYS:
+            value = kwargs.get(key, None)
+            if value is not None:
+                # Wrap in CONDConstant so it survives the conditioning processing
+                out[key] = comfy.conds.CONDConstant(value)
+
+        return out
+
+    model_obj.extra_conds = types.MethodType(patched_extra_conds, model_obj)
+    model_obj._wva_extra_conds_patched = True
+    logging.debug("WanVaceAdvanced: extra_conds passthrough patch applied")
+
 
 def wrap_vace_phantom_wan_model(model):
     """
@@ -20,6 +52,9 @@ def wrap_vace_phantom_wan_model(model):
     if not isinstance(diffusion_model, comfy.ldm.wan.model.VaceWanModel):
         logging.info("Not a VaceWanModel, skipping per-frame strength patch")
         return model
+
+    # Patch extra_conds to pass through custom conditioning keys
+    _patch_extra_conds_passthrough(model.model)
 
     # Register context windows callbacks if context windows are enabled
     context_handler = model.model_options.get("context_handler")
