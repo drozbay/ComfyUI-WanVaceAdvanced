@@ -40,8 +40,6 @@ class WanVacePhantomSimple:
 
     CATEGORY = "WanVaceAdvanced"
 
-    DEPRECATED = True
-
     def encode(self, positive, negative, vae, width, height, length, batch_size,
                vace_strength=1.0, vace_ref_strength=1.0,
                control_video=None, control_masks=None, vace_reference=None, phantom_images=None):
@@ -96,8 +94,6 @@ class WanVacePhantomDual:
 
     CATEGORY = "WanVaceAdvanced"
 
-    DEPRECATED = True
-
     def encode(self, positive, negative, vae, width, height, length, batch_size,
                vace_strength=1.0, vace_strength2=1.0, vace_ref_strength=1.0, vace_ref_strength2=1.0,
                control_video=None, control_masks=None, vace_reference=None,
@@ -151,9 +147,7 @@ class WanVacePhantomExperimental:
     FUNCTION = "encode"
 
     CATEGORY = "WanVaceAdvanced"
-
     EXPERIMENTAL = True
-    DEPRECATED = True
 
     def encode(self, positive, negative, vae, width, height, length, batch_size,
                vace_strength=1.0, vace_strength2=1.0, vace_ref_strength=None, vace_ref_strength2=None,
@@ -179,7 +173,7 @@ class WanVacePhantomSimpleV2:
 
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {
+        return {"optional": {
             "model": ("MODEL", ),
             "positive": ("CONDITIONING", ),
             "negative": ("CONDITIONING", ),
@@ -188,8 +182,6 @@ class WanVacePhantomSimpleV2:
             "height": ("INT", {"default": 480, "min": 16, "max": nodes.MAX_RESOLUTION, "step": 16}),
             "length": ("INT", {"default": 81, "min": 1, "max": nodes.MAX_RESOLUTION, "step": 4}),
             "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
-        },
-        "optional": {
             "latent_in": ("LATENT", {"tooltip": "Optional latent input to continue from"}),
             "control_video": ("IMAGE", ),
             "control_masks": ("MASK", ),
@@ -205,10 +197,19 @@ class WanVacePhantomSimpleV2:
 
     CATEGORY = "WanVaceAdvanced"
 
-    def encode(self, positive, negative, vae, width, height, length, batch_size,
-               model = None, latent_in = None,
+    def encode(self, positive=None, negative=None, vae=None, width=832, height=480, length=81, batch_size=1,
+               model=None, latent_in=None,
                vace_strength=1.0, vace_ref_strength=1.0,
                control_video=None, control_masks=None, vace_reference=None, phantom_images=None):
+
+        if positive is None:
+            raise ValueError("Positive conditioning is required. Please connect a conditioning input.")
+
+        if negative is None:
+            negative = positive
+
+        if vae is None:
+            raise ValueError("VAE is required. Please connect a VAE.")
 
         vace_strength_2 = 1.0
         vace_ref_strength_2 = 1.0
@@ -263,7 +264,7 @@ class WanVacePhantomDualV2:
 
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {
+        return {"optional": {
             "model": ("MODEL", ),
             "positive": ("CONDITIONING", ),
             "negative": ("CONDITIONING", ),
@@ -272,8 +273,6 @@ class WanVacePhantomDualV2:
             "height": ("INT", {"default": 480, "min": 16, "max": nodes.MAX_RESOLUTION, "step": 16}),
             "length": ("INT", {"default": 81, "min": 1, "max": nodes.MAX_RESOLUTION, "step": 4}),
             "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
-        },
-        "optional": {
             # Latent
             "latent_in": ("LATENT", {"tooltip": "Optional latent input to continue from"}),
             # First Vace Control
@@ -298,13 +297,22 @@ class WanVacePhantomDualV2:
 
     CATEGORY = "WanVaceAdvanced"
 
-    def encode(self, positive, negative, vae, width, height, length, batch_size,
-                model = None, latent_in = None,
+    def encode(self, positive=None, negative=None, vae=None, width=832, height=480, length=81, batch_size=1,
+                model=None, latent_in=None,
                 vace_strength_1=1.0, vace_strength_2=1.0, vace_ref_strength_1=1.0, vace_ref_strength_2=1.0,
                 control_video_1=None, control_masks_1=None, vace_reference_1=None,
                 control_video_2=None, control_masks_2=None, vace_reference_2=None,
                 phantom_images=None):
-        
+
+        if positive is None:
+            raise ValueError("Positive conditioning is required. Please connect a conditioning input.")
+
+        if negative is None:
+            negative = positive
+
+        if vae is None:
+            raise ValueError("VAE is required. Please connect a VAE.")
+
         # If a latent input is provided, ensure the node width/height match the latent's decoded pixel size.
         # Latent tensors are expected shape [..., C, T, H_latent, W_latent] -> pixel size = H_latent * vae_stride, W_latent * vae_stride
         vae_stride = 8
@@ -354,7 +362,7 @@ class WanVacePhantomExperimentalV2:
     
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {
+        return {"optional": {
                             "model": ("MODEL", ),
                             "positive": ("CONDITIONING", ),
                             "negative": ("CONDITIONING", ),
@@ -363,8 +371,6 @@ class WanVacePhantomExperimentalV2:
                             "height": ("INT", {"default": 480, "min": 16, "max": nodes.MAX_RESOLUTION, "step": 16}),
                             "length": ("INT", {"default": 81, "min": 1, "max": nodes.MAX_RESOLUTION, "step": 4}),
                             "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
-                },
-                "optional": {
                             # Latent input
                             "latent_in": ("LATENT", {"tooltip": "Optional latent input to continue from"}),
                             # First VACE control
@@ -395,7 +401,7 @@ class WanVacePhantomExperimentalV2:
     CATEGORY = "WanVaceAdvanced"
     EXPERIMENTAL = True
 
-    def encode(self, positive, negative, vae, width, height, length, batch_size,
+    def encode(self, positive=None, negative=None, vae=None, width=832, height=480, length=81, batch_size=1,
                model=None, latent_in=None,
                vace_strength_1=1.0, vace_strength_2=1.0, vace_ref_strength_1=None, vace_ref_strength_2=None,
                control_video_1=None, control_masks_1=None, vace_reference_1=None,
@@ -403,7 +409,16 @@ class WanVacePhantomExperimentalV2:
                phantom_images=None, phantom_mask_value=1.0, phantom_control_value=0.0, phantom_vace_strength=1.0,
                wva_options=None,
                ):
-        
+
+        if positive is None:
+            raise ValueError("Positive conditioning is required. Please connect a conditioning input.")
+
+        if negative is None:
+            negative = positive
+
+        if vae is None:
+            raise ValueError("VAE is required. Please connect a VAE.")
+
         # If a latent input is provided, ensure the node width/height match the latent's decoded pixel size.
         # Latent tensors are expected shape [..., C, T, H_latent, W_latent] -> pixel size = H_latent * vae_stride, W_latent * vae_stride
         vae_stride = 8
