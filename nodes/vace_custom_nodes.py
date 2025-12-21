@@ -8,7 +8,7 @@ import comfy.latent_formats
 import logging
 
 from ..core.vace_encoding import encode_vace_advanced
-from ..core.utils import WVAOptions, WVAPipe
+from ..core.utils import WVAOptions, WVAPipe, zero_out_conditioning
 
 class WanVacePhantomSimple:
     def __init__(self) -> None:
@@ -206,7 +206,7 @@ class WanVacePhantomSimpleV2:
             raise ValueError("Positive conditioning is required. Please connect a conditioning input.")
 
         if negative is None:
-            negative = positive
+            negative = zero_out_conditioning(positive)
 
         if vae is None:
             raise ValueError("VAE is required. Please connect a VAE.")
@@ -308,7 +308,7 @@ class WanVacePhantomDualV2:
             raise ValueError("Positive conditioning is required. Please connect a conditioning input.")
 
         if negative is None:
-            negative = positive
+            negative = zero_out_conditioning(positive)
 
         if vae is None:
             raise ValueError("VAE is required. Please connect a VAE.")
@@ -414,7 +414,7 @@ class WanVacePhantomExperimentalV2:
             raise ValueError("Positive conditioning is required. Please connect a conditioning input.")
 
         if negative is None:
-            negative = positive
+            negative = zero_out_conditioning(positive)
 
         if vae is None:
             raise ValueError("VAE is required. Please connect a VAE.")

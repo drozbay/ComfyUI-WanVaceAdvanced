@@ -210,3 +210,8 @@ def debug_save_images(image_frames, prefix="phantom", seg_index=None):
     except Exception as e:
         wan_print(f"Error saving {prefix} debug images: {e}")
 
+from nodes import ConditioningZeroOut
+
+def zero_out_conditioning(conditioning):
+    c = ConditioningZeroOut.zero_out(None, conditioning)
+    return c[0] if isinstance(c, tuple) else c
