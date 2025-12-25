@@ -1,7 +1,7 @@
 [project]
 name = "wanvaceadvanced"
 description = "Precise control over Vace frame strengths for reference images, control videos. Also allows Phantom embeddings to be combined with VACE accurately."
-version = "1.4.0"
+version = "1.5.0"
 license = {file = "LICENSE"} 
 
 [project.urls]
