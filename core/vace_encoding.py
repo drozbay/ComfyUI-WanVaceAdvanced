@@ -348,19 +348,285 @@ def encode_vace_advanced(positive, negative, vae, width, height, length, batch_s
 
     return (positive, negative, neg_phant_img, out_latent, trim_latent)
 
+def replace_vace_context(
+    positive, negative, vae,
+    control_video=None, control_masks=None, reference_image=None,
+    context_index=0, vace_strength=-1.0, vace_ref_strength=-1.0
+):
+    """
+    Replace VACE embeddings at context_index with new encoded images.
+    Only encodes what's provided; preserves existing embeddings for None inputs.
+    Use negative strength values to preserve existing strengths.
+    """
+    import copy
+
+    if control_video is not None and control_masks is None:
+        raise ValueError("control_masks is required when control_video is provided")
+
+    if (control_video is not None or reference_image is not None) and vae is None:
+        raise ValueError("VAE is required when image inputs are provided")
+
+    if not positive or len(positive) == 0:
+        raise ValueError("Positive conditioning is empty")
+
+    cond_dict = positive[0][1]
+    if 'vace_frames' not in cond_dict:
+        raise ValueError("Positive conditioning does not contain VACE embeddings (no 'vace_frames' key)")
+
+    vace_frames_list = cond_dict['vace_frames']
+    vace_mask_list = cond_dict['vace_mask']
+    vace_strength_list = cond_dict['vace_strength']
+
+    if context_index >= len(vace_frames_list):
+        raise ValueError(f"context_index {context_index} is out of range. Only {len(vace_frames_list)} contexts available.")
+
+    existing_frames = vace_frames_list[context_index]
+    existing_mask = vace_mask_list[context_index]
+    existing_strength = vace_strength_list[context_index]
+
+    if existing_frames.ndim == 5:
+        _, _, T_existing, H_latent, W_latent = existing_frames.shape
+    else:
+        T_existing, _, H_latent, W_latent = existing_frames.shape
+
+    height = H_latent * 8
+    width = W_latent * 8
+
+    # Count reference frames (have zero mask) vs control frames (non-zero mask)
+    num_ref_frames = 0
+    if existing_mask.ndim == 5:
+        mask_temporal = existing_mask.shape[2]
+    else:
+        mask_temporal = existing_mask.shape[1]
+
+    for t in range(min(mask_temporal, T_existing)):
+        if existing_mask.ndim == 5:
+            frame_mask = existing_mask[0, :, t, :, :]
+        else:
+            frame_mask = existing_mask[:, t, :, :]
+
+        if frame_mask.abs().max() < 0.01:
+            num_ref_frames += 1
+        else:
+            break
+
+    num_control_frames = T_existing - num_ref_frames
+
+    def _encode_latent(pixels):
+        return vae.encode(pixels)
+
+    new_control_latent = None
+    new_mask_latent = None
+    new_ref_latent = None
+
+    if control_video is not None:
+        control_length = control_video.shape[0]
+        expected_latent_frames = ((control_length - 1) // 4) + 1
+
+        if expected_latent_frames != num_control_frames:
+            raise ValueError(
+                f"Control video frame count mismatch. New video has {control_length} frames "
+                f"({expected_latent_frames} latent frames), but existing context has {num_control_frames} control latent frames. "
+                f"Please ensure the control video matches the existing context dimensions."
+            )
+
+        _control_video = comfy.utils.common_upscale(
+            control_video.movedim(-1, 1), width, height, "bilinear", "center"
+        ).movedim(1, -1)
+
+        _masks = control_masks.clone()
+        if _masks.ndim == 3:
+            _masks = _masks.unsqueeze(1)
+        _masks = comfy.utils.common_upscale(_masks, width, height, "bilinear", "center").movedim(1, -1)
+
+        if _control_video.shape[0] < control_length:
+            _control_video = torch.nn.functional.pad(
+                _control_video, (0, 0, 0, 0, 0, 0, 0, control_length - _control_video.shape[0]), value=0.5
+            )
+        if _masks.shape[0] < control_length:
+            _masks = torch.nn.functional.pad(
+                _masks, (0, 0, 0, 0, 0, 0, 0, control_length - _masks.shape[0]), value=1.0
+            )
+
+        # Split into inactive/reactive regions based on mask
+        _control_video = _control_video - 0.5
+        inactive = (_control_video * (1 - _masks)) + 0.5
+        reactive = (_control_video * _masks) + 0.5
+
+        inactive_encoded = _encode_latent(inactive[:, :, :, :3])
+        reactive_encoded = _encode_latent(reactive[:, :, :, :3])
+        new_control_latent = torch.cat((inactive_encoded, reactive_encoded), dim=1)
+
+        # Convert mask to latent space
+        vae_stride = 8
+        height_mask = height // vae_stride
+        width_mask = width // vae_stride
+        vace_length = control_length
+        vace_latent_length = ((vace_length - 1) // 4) + 1
+
+        masks_latent = _masks.view(vace_length, height_mask, vae_stride, width_mask, vae_stride)
+        masks_latent = masks_latent.permute(2, 4, 0, 1, 3)
+        masks_latent = masks_latent.reshape(vae_stride * vae_stride, vace_length, height_mask, width_mask)
+        masks_latent = torch.nn.functional.interpolate(
+            masks_latent.unsqueeze(0),
+            size=(vace_latent_length, height_mask, width_mask),
+            mode='nearest-exact'
+        ).squeeze(0)
+        new_mask_latent = masks_latent.unsqueeze(0)
+
+    if reference_image is not None:
+        ref_scaled = comfy.utils.common_upscale(
+            reference_image.movedim(-1, 1), width, height, "bilinear", "center"
+        ).movedim(1, -1)
+
+        ref_encoded = _encode_latent(ref_scaled[:, :, :, :3])
+
+        # VACE format: 16 encoded channels + 16 zero channels
+        new_ref_latent = torch.cat([
+            ref_encoded,
+            comfy.latent_formats.Wan21().process_out(torch.zeros_like(ref_encoded))
+        ], dim=1)
+
+        new_num_ref_frames = new_ref_latent.shape[2]
+
+        if num_ref_frames > 0 and new_num_ref_frames != num_ref_frames:
+            raise ValueError(
+                f"Reference image frame count mismatch. New reference has {new_num_ref_frames} frames, "
+                f"but existing context has {num_ref_frames} reference frames."
+            )
+
+    def _build_strength_list(new_strength, existing_strengths, count, default_fallback=1.0):
+        """Build strength list. Negative values preserve existing strengths."""
+        result = []
+
+        if isinstance(new_strength, (list, tuple)):
+            for i in range(count):
+                if i < len(new_strength):
+                    val = new_strength[i]
+                    if val < 0:
+                        if existing_strengths and i < len(existing_strengths):
+                            result.append(existing_strengths[i])
+                        else:
+                            result.append(default_fallback)
+                    else:
+                        result.append(val)
+                else:
+                    last_val = new_strength[-1] if new_strength else default_fallback
+                    if last_val < 0:
+                        if existing_strengths and i < len(existing_strengths):
+                            result.append(existing_strengths[i])
+                        else:
+                            result.append(default_fallback)
+                    else:
+                        result.append(last_val)
+        else:
+            if new_strength < 0:
+                if existing_strengths:
+                    result = list(existing_strengths[:count])
+                    while len(result) < count:
+                        result.append(result[-1] if result else default_fallback)
+                else:
+                    result = [default_fallback] * count
+            else:
+                result = [new_strength] * count
+
+        return result
+
+    existing_ref_strengths = []
+    existing_control_strengths = []
+    if isinstance(existing_strength, list) and len(existing_strength) > 0:
+        full_strengths = existing_strength[0]
+        existing_ref_strengths = full_strengths[:num_ref_frames] if num_ref_frames > 0 else []
+        existing_control_strengths = full_strengths[num_ref_frames:] if num_ref_frames < len(full_strengths) else []
+
+    if control_video is not None and reference_image is not None:
+        # Replace both reference and control
+        replacement_frames = torch.cat((new_ref_latent, new_control_latent), dim=2)
+        mask_pad = torch.zeros_like(new_mask_latent[:, :, :new_ref_latent.shape[2], :, :])
+        replacement_mask = torch.cat((mask_pad, new_mask_latent), dim=2)
+
+        new_num_ref_frames = new_ref_latent.shape[2]
+        num_control_latent_frames = new_control_latent.shape[2]
+        batch_size = len(existing_strength) if isinstance(existing_strength, list) else 1
+
+        ref_strengths = _build_strength_list(vace_ref_strength, existing_ref_strengths, new_num_ref_frames, default_fallback=0.5)
+        ctrl_strengths = _build_strength_list(vace_strength, existing_control_strengths, num_control_latent_frames, default_fallback=1.0)
+        replacement_strength = [ref_strengths + ctrl_strengths] * batch_size
+
+    elif control_video is not None:
+        # Replace only control, preserve existing reference
+        if num_ref_frames > 0:
+            if existing_frames.ndim == 5:
+                existing_ref = existing_frames[:, :, :num_ref_frames, :, :]
+            else:
+                existing_ref = existing_frames[:num_ref_frames, :, :, :]
+            replacement_frames = torch.cat((existing_ref, new_control_latent), dim=2)
+
+            if existing_mask.ndim == 5:
+                existing_ref_mask = existing_mask[:, :, :num_ref_frames, :, :]
+            else:
+                existing_ref_mask = existing_mask[:, :num_ref_frames, :, :]
+            replacement_mask = torch.cat((existing_ref_mask, new_mask_latent), dim=2)
+        else:
+            replacement_frames = new_control_latent
+            replacement_mask = new_mask_latent
+
+        num_control_latent_frames = new_control_latent.shape[2]
+        batch_size = len(existing_strength) if isinstance(existing_strength, list) else 1
+
+        ctrl_strengths = _build_strength_list(vace_strength, existing_control_strengths, num_control_latent_frames, default_fallback=1.0)
+        replacement_strength = [list(existing_ref_strengths) + ctrl_strengths] * batch_size
+
+    elif reference_image is not None:
+        # Replace only reference, preserve existing control
+        if num_ref_frames > 0:
+            if existing_frames.ndim == 5:
+                existing_control = existing_frames[:, :, num_ref_frames:, :, :]
+                existing_control_mask = existing_mask[:, :, num_ref_frames:, :, :]
+            else:
+                existing_control = existing_frames[num_ref_frames:, :, :, :]
+                existing_control_mask = existing_mask[:, num_ref_frames:, :, :]
+        else:
+            existing_control = existing_frames
+            existing_control_mask = existing_mask
+
+        replacement_frames = torch.cat((new_ref_latent, existing_control), dim=2)
+
+        new_num_ref_frames = new_ref_latent.shape[2]
+        mask_pad = torch.zeros([1, 64, new_num_ref_frames, H_latent, W_latent],
+                               device=existing_control_mask.device, dtype=existing_control_mask.dtype)
+        replacement_mask = torch.cat((mask_pad, existing_control_mask), dim=2)
+
+        batch_size = len(existing_strength) if isinstance(existing_strength, list) else 1
+
+        ref_strengths = _build_strength_list(vace_ref_strength, existing_ref_strengths, new_num_ref_frames, default_fallback=0.5)
+        replacement_strength = [ref_strengths + list(existing_control_strengths)] * batch_size
+    else:
+        return (positive, negative if negative is not None else positive)
+
+    new_positive = copy.deepcopy(positive)
+    new_positive[0][1]['vace_frames'][context_index] = replacement_frames
+    new_positive[0][1]['vace_mask'][context_index] = replacement_mask
+    new_positive[0][1]['vace_strength'][context_index] = replacement_strength
+
+    if negative is not None:
+        new_negative = copy.deepcopy(negative)
+        new_negative[0][1]['vace_frames'][context_index] = replacement_frames
+        new_negative[0][1]['vace_mask'][context_index] = replacement_mask
+        new_negative[0][1]['vace_strength'][context_index] = replacement_strength
+    else:
+        new_negative = new_positive
+
+    return (new_positive, new_negative)
+
+
 def format_strength_list(s_list):
-    """
-    Format a strength list for printing.
-    """
-    if not s_list:
+    """Format a strength list for debug output."""
+    if not s_list or len(s_list) == 0:
         return "[]"
-    if len(s_list) == 0:
-        return "[]"
-    
-    # Format all numbers to two decimal places
+
     formatted_list = [f"{x:.2f}" for x in s_list]
-    
-    # If all elements are the same and there are more than 2, summarize
+
     if len(formatted_list) > 2 and len(set(formatted_list)) == 1:
         return f"[{formatted_list[0]} ... {formatted_list[-1]}]"
     else:
@@ -368,19 +634,15 @@ def format_strength_list(s_list):
 
 
 def print_strength_debug_info(vace_strength_list, vace_references_encoded, num_phantom_images):
-    """
-    Print debug information about VACE strength distribution.
-    """
-    # Format the inner list for printing
+    """Print VACE strength distribution for debugging."""
     formatted_inner_list = format_strength_list(vace_strength_list[0])
     print(f"Using vace_strength as list: {formatted_inner_list} (length {len(vace_strength_list[0])})")
-    
-    # Print the reference, control, and phantom strength parts
+
     vace_reference_length = vace_references_encoded.shape[2] if vace_references_encoded is not None else 0
     reference_strength_part = vace_strength_list[0][:vace_reference_length] if vace_references_encoded is not None else []
     control_strength_part = vace_strength_list[0][vace_reference_length:-(num_phantom_images)] if num_phantom_images > 0 else vace_strength_list[0][vace_reference_length:]
     phantom_strength_part = vace_strength_list[0][-(num_phantom_images):] if num_phantom_images > 0 else []
-    
+
     print(f"Reference strength: {format_strength_list(reference_strength_part)} (length {len(reference_strength_part)})")
     print(f"Control strength: {format_strength_list(control_strength_part)} (length {len(control_strength_part)})")
     print(f"Phantom images strength: {format_strength_list(phantom_strength_part)} (length {len(phantom_strength_part)})")

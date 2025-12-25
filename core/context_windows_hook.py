@@ -189,6 +189,19 @@ def _inject_window_reference(sliced_vace, new_cond_item, context_handler, device
         mapping_str = mapping_cond.cond if hasattr(mapping_cond, "cond") else mapping_cond
     explicit_mapping = _parse_ref_mapping(mapping_str) if mapping_str else None
 
+    # Get per-reference strengths
+    strengths_cond = new_cond_item.get("window_reference_strengths", None)
+    strengths_value = None
+    if strengths_cond is not None:
+        strengths_value = strengths_cond.cond if hasattr(strengths_cond, "cond") else strengths_cond
+
+    if isinstance(strengths_value, (list, tuple)):
+        explicit_strengths = list(strengths_value) if strengths_value else None
+    elif isinstance(strengths_value, (int, float)):
+        explicit_strengths = [float(strengths_value)]
+    else:
+        explicit_strengths = None
+
     if explicit_mapping:
         # Explicit mapping: use mapping[window_idx], repeat last if overflow
         if window_idx < len(explicit_mapping):
@@ -232,23 +245,34 @@ def _inject_window_reference(sliced_vace, new_cond_item, context_handler, device
     num_ops = sliced_vace.shape[1]
     ref_temporal = selected_ref_device.shape[2]  # Should be 1
 
+    # Determine strength for this reference
+    if explicit_strengths:
+        if len(explicit_strengths) == 1:
+            ref_strength = explicit_strengths[0]
+        elif selected_ref_idx < len(explicit_strengths):
+            ref_strength = explicit_strengths[selected_ref_idx]
+        else:
+            ref_strength = 1.0
+    else:
+        ref_strength = 1.0
+
     # Expand reference to match vace_context dimensions
     # selected_ref: [1, 32, T_ref, H, W] -> [B, num_ops, 32, T_ref, H, W]
     selected_ref_expanded = selected_ref_device.unsqueeze(1).expand(
         batch_size, num_ops, -1, -1, -1, -1
     )
 
+    if ref_strength != 1.0:
+        selected_ref_expanded = selected_ref_expanded * ref_strength
+
     # Inject into the first frames of the inactive channels
     sliced_vace[:, :, :32, :ref_temporal, :, :] = selected_ref_expanded
 
-    if explicit_mapping:
-        logging.info(
-            f"[WanVaceAdvanced] Window {window_idx}: injected reference [{selected_ref_idx}] (explicit mapping)"
-        )
-    else:
-        logging.info(
-            f"[WanVaceAdvanced] Window {window_idx}: injected reference [{selected_ref_idx}]"
-        )
+    mapping_info = " (explicit mapping)" if explicit_mapping else ""
+    logging.info(
+        f"[WanVaceAdvanced] Window {window_idx}: injected reference [{selected_ref_idx}] "
+        f"(strength={ref_strength:.2f}){mapping_info}"
+    )
 
     return sliced_vace
 

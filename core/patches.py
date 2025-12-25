@@ -11,8 +11,9 @@ from .utils import wan_print
 
 # List of custom conditioning keys that should be passed through to model_conds
 CUSTOM_PASSTHROUGH_KEYS = [
-    "window_reference_batch",   # Per-window reference images for context windows
-    "window_reference_mapping", # Explicit mapping string for window-to-reference assignment
+    "window_reference_batch",     # Per-window reference images for context windows
+    "window_reference_mapping",   # Explicit mapping string for window-to-reference assignment
+    "window_reference_strengths", # Per-reference strength values
 ]
 
 def _patch_extra_conds_passthrough(model_obj):

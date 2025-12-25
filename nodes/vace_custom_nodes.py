@@ -7,7 +7,7 @@ import comfy.model_management
 import comfy.latent_formats
 import logging
 
-from ..core.vace_encoding import encode_vace_advanced
+from ..core.vace_encoding import encode_vace_advanced, replace_vace_context
 from ..core.utils import WVAOptions, WVAPipe, zero_out_conditioning
 
 class WanVacePhantomSimple:
@@ -1172,10 +1172,14 @@ class WanVaceWindowReferences:
                     "tooltip": "Target width for reference images. Images will be resized to match."}),
                 "height": ("INT", {"default": 480, "min": 16, "max": nodes.MAX_RESOLUTION, "step": 16,
                     "tooltip": "Target height for reference images. Images will be resized to match."}),
+                "ref_strengths": ("FLOAT", {
+                    "default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01,
+                    "tooltip": "Per-reference strength. Can be a single value (applies to all) or connect a list of floats for per-reference control."
+                }),
                 "explicit_ref_mapping": ("STRING", {
                     "default": "",
                     "tooltip": "Explicit mapping of references to windows. Format: '0,1,2,1,0' maps ref[0] to window 0, "
-                              "ref[1] to window 1, etc. If empty, uses round-robin. Extra windows repeat last entry."
+                              "ref[1] to window 1, etc. If empty, uses 1:1 mapping. Extra windows repeat last entry."
                 }),
             }
         }
@@ -1185,17 +1189,20 @@ class WanVaceWindowReferences:
     FUNCTION = "encode"
     CATEGORY = "WanVaceAdvanced"
 
-    def encode(self, positive, negative, vae, reference_images, width=832, height=480, explicit_ref_mapping=""):
+    def encode(self, positive, negative, vae, reference_images, width=832, height=480,
+               ref_strengths=1.0, explicit_ref_mapping=""):
         """
         Encode each reference image through VAE and store as a batch for per-window injection.
 
         The encoded references are stored in conditioning under 'window_reference_batch'.
         During context window processing, the callback will select the appropriate reference
-        for each window using explicit_ref_mapping if provided, otherwise round-robin.
+        for each window using explicit_ref_mapping if provided, otherwise 1:1 mapping.
 
         Args:
+            ref_strengths: Float or list of floats for per-reference strengths.
+                           Single value applies to all refs. List applies per-reference index.
             explicit_ref_mapping: Optional string like "0,1,2,1,0" for explicit window-to-ref mapping.
-                                  If empty, uses round-robin (window_idx % num_refs).
+                                  If empty, uses 1:1 mapping with repeat-last for extra windows.
         """
         import comfy.utils
 
@@ -1236,9 +1243,19 @@ class WanVaceWindowReferences:
 
         logging.info(f"WanVaceWindowReferences: Encoded {len(encoded_refs)} references, shape: {encoded_refs[0].shape}")
 
-        # Store the list of encoded references and optional mapping in conditioning
+        # Store the list of encoded references and optional mapping/strengths in conditioning
         # The callback will select the appropriate reference for each window
         cond_values = {"window_reference_batch": encoded_refs}
+
+        # Handle ref_strengths - can be single float or list of floats
+        # Always store as list for consistent handling in the callback
+        if isinstance(ref_strengths, (list, tuple)):
+            strengths_list = list(ref_strengths)
+        else:
+            # Single float - will be expanded or used as default in callback
+            strengths_list = [float(ref_strengths)]
+        cond_values["window_reference_strengths"] = strengths_list
+        logging.info(f"WanVaceWindowReferences: Using ref strengths: {strengths_list}")
         if explicit_ref_mapping.strip():
             cond_values["window_reference_mapping"] = explicit_ref_mapping
             logging.info(f"WanVaceWindowReferences: Using explicit mapping: {explicit_ref_mapping}")
@@ -1247,6 +1264,54 @@ class WanVaceWindowReferences:
         negative = node_helpers.conditioning_set_values(negative, cond_values)
 
         return (positive, negative)
+
+
+class WanVaceReplace:
+    """
+    Replace specific parts of existing VACE embeddings in conditioning.
+    """
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "positive": ("CONDITIONING",),
+            },
+            "optional": {
+                "negative": ("CONDITIONING",),
+                "vae": ("VAE",),
+                "control_video": ("IMAGE", {"tooltip": "New control video to encode and replace existing"}),
+                "control_masks": ("MASK", {"tooltip": "New masks (required if control_video provided)"}),
+                "reference_image": ("IMAGE", {"tooltip": "New reference image to encode and replace existing"}),
+                "context_index": ("INT", {"default": 0, "min": 0, "max": 10,
+                    "tooltip": "Which VACE context to modify (0 = first context)"}),
+                "vace_strength": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 1000.0, "step": 0.01,
+                    "tooltip": "Strength for control frames. Use -1.0 to preserve existing strengths from the embedding."}),
+                "vace_ref_strength": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 1000.0, "step": 0.01,
+                    "tooltip": "Strength for reference frames. Use -1.0 to preserve existing strengths from the embedding."}),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING")
+    RETURN_NAMES = ("positive", "negative")
+    FUNCTION = "replace_vace"
+    CATEGORY = "WanVaceAdvanced"
+
+    def replace_vace(self, positive, negative=None, vae=None,
+                     control_video=None, control_masks=None, reference_image=None,
+                     context_index=0, vace_strength=-1.0, vace_ref_strength=-1.0):
+
+        return replace_vace_context(
+            positive=positive,
+            negative=negative,
+            vae=vae,
+            control_video=control_video,
+            control_masks=control_masks,
+            reference_image=reference_image,
+            context_index=context_index,
+            vace_strength=vace_strength,
+            vace_ref_strength=vace_ref_strength
+        )
 
 
 NODE_CLASS_MAPPINGS = {
@@ -1264,6 +1329,7 @@ NODE_CLASS_MAPPINGS = {
     "StringToFloatListRanged": StringToFloatListRanged,
     "WanMaskToLatentSpace": WanNoiseMaskToLatentSpace,
     "WanVaceWindowReferences": WanVaceWindowReferences,
+    "WanVaceReplace": WanVaceReplace,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1281,4 +1347,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "StringToFloatListRanged": "StringToFloatListRanged",
     "WanNoiseMaskToLatentSpace": "WanNoiseMaskToLatentSpace",
     "WanVaceWindowReferences": "WanVaceRefsToContextWindows",
+    "WanVaceReplace": "WanVaceReplace",
 }
