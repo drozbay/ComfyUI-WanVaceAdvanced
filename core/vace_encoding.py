@@ -149,6 +149,8 @@ def encode_vace_advanced(positive, negative, vae, width, height, length, batch_s
 
         # Calculate the additional length needed for Phantom images in Vace embeds
         num_phantom_images = 0 if phantom_images is None else len(phantom_images)
+        if num_phantom_images > 0 and wva_options is not None and getattr(wva_options, 'phantom_pad_to_4', False):
+            num_phantom_images = max(num_phantom_images, 4)
         vace_length = length + num_phantom_images * 4
 
         vace_latent_length = ((vace_length - 1) // 4) + 1
@@ -255,6 +257,8 @@ def encode_vace_advanced(positive, negative, vae, width, height, length, batch_s
         phantom_images = phantom_images.clone()
 
     num_phantom_images = 0 if phantom_images is None else len(phantom_images)
+    if num_phantom_images > 0 and wva_options is not None and getattr(wva_options, 'phantom_pad_to_4', False):
+        num_phantom_images = max(num_phantom_images, 4)
 
     # Always process first VACE context
     control_video_latent_1, masks_latent_1, vace_strength_list_1, vace_references_encoded_1, trim_latent_1 = _create_vace_lists(control_video_1, control_masks_1, vace_reference_1, vace_strength_1, vace_ref_strength_1)
@@ -319,6 +323,13 @@ def encode_vace_advanced(positive, negative, vae, width, height, length, batch_s
         for i in phantom_images_scaled:
             latent_images += [_encode_latent(i.unsqueeze(0)[:, :, :, :3])]
         concat_latent_image = torch.cat(latent_images, dim=2)
+
+        # Pad to num_phantom_images (4 when phantom_pad_to_4 is enabled) with zero latents
+        if concat_latent_image.shape[2] < num_phantom_images:
+            pad_count = num_phantom_images - concat_latent_image.shape[2]
+            pad_shape = list(concat_latent_image.shape)
+            pad_shape[2] = pad_count
+            concat_latent_image = torch.cat([concat_latent_image, torch.zeros(pad_shape, device=concat_latent_image.device, dtype=concat_latent_image.dtype)], dim=2)
 
         # Check if there's already a phantom embedding and warn if overwriting
         if positive and len(positive) > 0 and "time_dim_concat" in positive[0][1]:

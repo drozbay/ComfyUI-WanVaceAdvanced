@@ -920,6 +920,7 @@ class WVAOptionsNode:
                 "debug_save_phantom": ("BOOLEAN", {"default": False, "tooltip": "Save phantom images to temp folder for debugging"}),
                 "phantom_resize_mode": (["center", "pad_edge"], {"default": "center", "tooltip": "How to resize phantom images: center=crop to fit, pad_edge=preserve aspect ratio with edge padding"}),
                 "phantom_combined_negative": ("BOOLEAN", {"default": False, "tooltip": "Use Conditioning (Combine) for phantom negative conditioning."}),
+                "phantom_pad_to_4": ("BOOLEAN", {"default": False, "tooltip": "Always use 4 phantom reference latents. Missing slots are filled with zero tensors."}),
             }
         }
     
@@ -928,15 +929,17 @@ class WVAOptionsNode:
     FUNCTION = "create_options"
     CATEGORY = "WanVaceAdvanced"
     
-    def create_options(self, use_tiled_vae=False, phantom_resize_mode="center", 
-                      enable_debug_prints=True, debug_save_phantom=False, phantom_combined_negative=False):
-        
+    def create_options(self, use_tiled_vae=False, phantom_resize_mode="center",
+                      enable_debug_prints=True, debug_save_phantom=False, phantom_combined_negative=False,
+                      phantom_pad_to_4=False):
+
         options = WVAOptions(
             use_tiled_vae=use_tiled_vae,
             enable_debug_prints=enable_debug_prints,
             debug_save_images=debug_save_phantom,
             phantom_resize_mode=phantom_resize_mode,
-            phantom_combined_negative=phantom_combined_negative
+            phantom_combined_negative=phantom_combined_negative,
+            phantom_pad_to_4=phantom_pad_to_4
         )
         
         return (options,)

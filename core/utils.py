@@ -33,14 +33,16 @@ class WVAOptions:
                  enable_debug_prints=True,
                  debug_save_images=False,
                  phantom_resize_mode="center",
-                 phantom_combined_negative=False
+                 phantom_combined_negative=False,
+                 phantom_pad_to_4=False
                 ):
-        
+
         self.use_tiled_vae = use_tiled_vae
         self.enable_debug_prints = enable_debug_prints
         self.debug_save_images = debug_save_images
         self.phantom_resize_mode = phantom_resize_mode
         self.phantom_combined_negative = phantom_combined_negative
+        self.phantom_pad_to_4 = phantom_pad_to_4
 
     def get_option(self, key, default=None):
         return getattr(self, key, default)
