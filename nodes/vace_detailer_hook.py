@@ -2,14 +2,10 @@ import torch
 import sys
 from pathlib import Path
 
-parent_dir = Path(__file__).parent.parent
-if str(parent_dir) not in sys.path:
-    sys.path.insert(0, str(parent_dir))
-
 import comfy.utils
 import comfy.model_management as mm
-from core.utils import wan_print, wan_print_d
-from core.vace_encoding import encode_vace_advanced
+from ..core.utils import wan_print, wan_print_d
+from ..core.vace_encoding import encode_vace_advanced
 
 
 def get_memory_info():
